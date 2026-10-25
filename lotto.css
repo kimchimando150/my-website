@@ -1,0 +1,13 @@
+#mySubmit{
+    font-size: 1em;
+    font-size: 1em;
+    color:white;
+    background-color:rgb(152, 183, 241);
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.25s;
+}
+
+#mySubmit:hover{
+    background-color:rgb(130, 169, 241);
+}
