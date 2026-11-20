@@ -1,0 +1,2842 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Bounce</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: #090f20;
+      color: #f4f7fb;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      min-height: 100vh;
+      min-height: 100dvh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      background:
+        radial-gradient(ellipse at 50% 5%, #243d66 0, transparent 42%),
+        linear-gradient(145deg, #0d1428, #111b30 55%, #09101f);
+      overscroll-behavior: none;
+    }
+
+    main { width: min(100%, 850px); text-align: center; }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 1.7rem;
+      letter-spacing: .08em;
+      text-shadow: 0 0 24px #54aaff88;
+    }
+    .hint { margin: 0 0 14px; color: #bdcbe0; font-size: .95rem; }
+
+    .game-frame {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid #7295bd;
+      border-radius: 18px;
+      background: #101c34;
+      box-shadow: 0 0 0 4px #81bfff12, 0 20px 60px #0009, 0 0 34px #308aff20;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      aspect-ratio: 7 / 5;
+      touch-action: none;
+    }
+
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      background: #101827bd;
+    }
+
+    .overlay[hidden] { display: none; }
+    .scene { width: min(100%, 850px); max-height: calc(100dvh - 40px); margin: 0 auto; overflow-y: auto; }
+    .scene[hidden], .game-view[hidden] { display: none; }
+    .overlay .message[hidden] { display: none; }
+    .game-toolbar[hidden] { display: none; }
+
+    .message {
+      padding: 20px;
+      border: 1px solid #799bc2;
+      border-radius: 16px;
+      background: linear-gradient(145deg, #213755, #15243b);
+      box-shadow: 0 14px 40px #0008;
+    }
+
+    .message h2 { margin: 0 0 8px; }
+    .message p { margin: 0 0 14px; color: #c4d1e2; }
+    .message { width: min(100%, 430px); max-height: 100%; overflow-y: auto; }
+    .menu-actions, .shop-actions { display: grid; gap: 10px; }
+    .account-box { display: grid; gap: 8px; margin: 14px 0; text-align: left; }
+    .account-box input {
+      width: 100%;
+      min-height: 44px;
+      padding: 8px 12px;
+      border: 1px solid #87a7ce;
+      border-radius: 10px;
+      background: #101c34;
+      color: #fff;
+      font: inherit;
+    }
+    .account-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .account-actions[hidden], .friends-panel[hidden] { display: none; }
+    .account-message, .online-status { min-height: 1.4em; margin: 4px 0; color: #c4d1e2; font-size: .9rem; }
+    .friends-panel { display: grid; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #6c86a5; }
+    .friend-add-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+    .friend-add-row button, .friend-heading button, .friend-row button { min-height: 38px; padding: 4px 10px; font-size: .88rem; }
+    .friend-heading { display: flex; justify-content: space-between; align-items: center; }
+    .friend-section h4 { margin: 6px 0; color: #cfe2ff; }
+    .friend-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+    .friend-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .friend-row-actions { display: flex; gap: 6px; }
+    .secondary {
+      padding: 8px 16px;
+      font-size: 1rem;
+      background: linear-gradient(145deg, #304a6c, #1d304d);
+    }
+
+    .shop-list { display: grid; gap: 10px; margin: 14px 0; text-align: left; }
+    .shop-card {
+      display: grid;
+      grid-template-columns: 44px 1fr auto;
+      align-items: center;
+      gap: 10px;
+      padding: 10px;
+      border: 1px solid #6c86a5;
+      border-radius: 12px;
+      background: #101c34aa;
+    }
+    .shop-card p { margin: 3px 0 0; font-size: .82rem; }
+    .shop-card button { min-width: 82px; min-height: 40px; padding: 4px 8px; font-size: .9rem; }
+    .shop-sort-row { margin: 12px 0; text-align: left; }
+    .ball-preview {
+      display: inline-block;
+      width: 30px;
+      height: 30px;
+      border: 2px solid #ffffffaa;
+      border-radius: 50%;
+      background: var(--ball-color);
+      box-shadow: 0 0 14px color-mix(in srgb, var(--ball-color), transparent 35%);
+    }
+    .ball-preview.diamond { width: 23px; height: 23px; margin: 4px; border-radius: 5px; transform: rotate(45deg); }
+    .ball-preview.star {
+      border: 0;
+      clip-path: polygon(50% 0%, 62% 35%, 98% 36%, 69% 58%, 80% 94%, 50% 72%, 20% 94%, 31% 58%, 2% 36%, 38% 35%);
+    }
+    .ball-preview.ring { border: 5px solid var(--ball-color); background: transparent; }
+    .ball-preview.rainbow { background: conic-gradient(#ff4d6d, #ffca3a, #8ac926, #20c9c3, #4361ee, #b5179e, #ff4d6d); }
+    .ball-preview.blackhole { border-color: #b19aff; background: radial-gradient(circle, #05040b 32%, #321b55 52%, #ff8f3d 72%, #18102b 80%); }
+    .ball-preview.galaxy { background: radial-gradient(circle at 65% 35%, #fff 0 5%, transparent 8%), radial-gradient(circle, #a872ff, #362078 65%, #11132f); }
+    .ball-preview.comet { border: 0; background: linear-gradient(110deg, transparent 10%, #74e6ff 50%, #fff 78%); }
+    .ball-preview.sun { background: radial-gradient(circle, #fff5b8, #ffb52e 55%, #ef5c35); }
+    .ball-preview.crystal, .ball-preview.lightning { border-radius: 5px; clip-path: polygon(50% 0, 100% 35%, 78% 100%, 22% 100%, 0 35%); }
+    .ball-preview.neon { border: 3px solid #68fff1; background: #102e43; box-shadow: inset 0 0 8px #68fff1, 0 0 14px #68fff1; }
+    .ball-preview.ice { border-radius: 8px; clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); }
+    .ball-preview.clock { border: 3px solid #fff1b1; background: radial-gradient(circle, #ffdb70 0 62%, #d17b22 65%); box-shadow: 0 0 12px #ffdb70; position: relative; }
+    .ball-preview.clock::after { content: ""; position: absolute; width: 7px; height: 7px; left: 8px; top: 5px; border-left: 2px solid #fff8df; border-bottom: 2px solid #fff8df; }
+    .ball-preview.heart { border: 0; border-radius: 0; clip-path: polygon(50% 94%, 7% 52%, 4% 31%, 14% 12%, 34% 9%, 50% 27%, 66% 9%, 86% 12%, 96% 31%, 93% 52%); }
+    .ball-preview.moon { border: 0; background: radial-gradient(circle at 72% 30%, transparent 36%, var(--ball-color) 39%); }
+    .ball-preview.planet { position: relative; border-color: #e7fbff; }
+    .ball-preview.planet::after { content: ""; position: absolute; inset: 5px -5px; border: 2px solid var(--ball-color); border-radius: 50%; transform: rotate(-28deg); }
+    .ball-preview.hex { clip-path: polygon(25% 3%, 75% 3%, 100% 50%, 75% 97%, 25% 97%, 0 50%); }
+    .ball-preview.flower { border: 0; background: radial-gradient(circle, #fff5a8 0 16%, transparent 18%), radial-gradient(circle at 50% 8%, var(--ball-color) 0 24%, transparent 27%), radial-gradient(circle at 90% 38%, var(--ball-color) 0 24%, transparent 27%), radial-gradient(circle at 75% 88%, var(--ball-color) 0 24%, transparent 27%), radial-gradient(circle at 25% 88%, var(--ball-color) 0 24%, transparent 27%), radial-gradient(circle at 10% 38%, var(--ball-color) 0 24%, transparent 27%); }
+    .ball-preview.flame { border-radius: 45% 45% 50% 50%; clip-path: polygon(50% 0, 76% 34%, 100% 54%, 88% 90%, 63% 100%, 30% 96%, 8% 76%, 18% 53%, 36% 34%); }
+    .ball-preview.gear { clip-path: polygon(42% 0, 58% 0, 63% 12%, 77% 8%, 85% 20%, 81% 34%, 94% 42%, 94% 58%, 81% 64%, 86% 79%, 75% 89%, 62% 84%, 56% 100%, 40% 96%, 36% 83%, 20% 88%, 11% 76%, 17% 62%, 3% 56%, 4% 40%, 18% 35%, 13% 20%, 25% 10%, 37% 16%); }
+    .ball-preview.pixel { border: 0; border-radius: 3px; background: repeating-conic-gradient(var(--ball-color) 0 25%, #f5ffff 0 50%) 0 0 / 12px 12px; }
+    .ball-preview.prism { border: 0; border-radius: 0; clip-path: polygon(50% 0, 100% 76%, 50% 100%, 0 76%); background: linear-gradient(135deg, #fff, var(--ball-color) 48%, #69eaff); }
+    .ball-preview.vortex { border: 3px solid #cfe4ff; background: conic-gradient(from 25deg, var(--ball-color), #171943, var(--ball-color)); }
+    .paddle-preview { width: 34px; height: 14px; border: 0; border-radius: 8px; background: var(--ball-color); }
+    .paddle-preview.clock { border: 1px solid #fff1b1; background: linear-gradient(90deg, #9f5d20, #ffdb70 50%, #9f5d20); box-shadow: 0 0 10px #ffdb7077; }
+    .background-preview { width: 32px; height: 32px; border-radius: 8px; background: linear-gradient(145deg, var(--bg-top), var(--bg-middle), var(--bg-bottom)); }
+    .background-preview.clock { background: radial-gradient(circle, #eac15a22 0 28%, transparent 30%), linear-gradient(145deg, #121b2c, #594822, #171d2d); }
+    .settings-list { display: grid; gap: 14px; margin: 16px 0; text-align: left; }
+    .settings-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .settings-row input[type="range"] { width: 48%; accent-color: #58a6ff; }
+    .settings-row input[type="checkbox"] { width: 22px; height: 22px; accent-color: #58a6ff; }
+    .settings-row select {
+      max-width: 52%;
+      padding: 8px;
+      border: 1px solid #87a7ce;
+      border-radius: 8px;
+      background: #1d304d;
+      color: #fff;
+      font: inherit;
+    }
+    .game-toolbar { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; width: min(100%, 150px); margin: 0 0 10px auto; }
+    .game-toolbar button { min-width: 0; min-height: 42px; padding: 5px; font-size: .9rem; }
+    .game-toolbar .icon-button { font-size: 1.45rem; line-height: 1; }
+    .pause-glyph { display: flex; align-items: center; justify-content: center; gap: 4px; width: 20px; height: 20px; }
+    .pause-glyph i { display: block; width: 3px; height: 16px; border-radius: 2px; background: currentColor; }
+    .play-glyph { display: none; width: 0; height: 0; margin-left: 3px; border-top: 9px solid transparent; border-bottom: 9px solid transparent; border-left: 13px solid currentColor; }
+    #pause-button.is-resume .pause-glyph { display: none; }
+    #pause-button.is-resume .play-glyph { display: block; }
+    .continue-action { display: grid; justify-items: center; gap: 8px; margin: 0 auto 12px; }
+    .continue-action[hidden] { display: none; }
+    .continue-countdown { position: relative; display: grid; width: 52px; height: 52px; place-items: center; color: #ead99c; font-size: .9rem; font-weight: 650; }
+    .continue-countdown[hidden] { display: none; }
+    .continue-countdown svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+    .continue-countdown circle { fill: none; stroke-width: 3; }
+    .continue-countdown .timer-track { stroke: #ead99c33; }
+    .continue-countdown .timer-progress { stroke: #d6bd72; stroke-dasharray: 138.23; stroke-dashoffset: 0; transition: stroke-dashoffset .1s linear; }
+    .continue-countdown span { position: relative; }
+    .points { color: #ffd166; font-weight: 700; }
+    .leaderboards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; margin: 14px 0; text-align: left; }
+    .leaderboard { padding: 10px 12px; border: 1px solid #6c86a5; border-radius: 12px; background: #101c34aa; }
+    .leaderboard h3 { margin: 0 0 8px; font-size: 1rem; color: #cfe2ff; }
+    .leaderboard ol { display: grid; gap: 4px; margin: 0; padding-left: 24px; color: #dce7f5; font-size: .9rem; }
+    .leaderboard li { padding-left: 2px; }
+    .leaderboard li span { float: right; color: #ffd166; font-weight: 700; }
+    .leaderboard-status { min-height: 1.2em; margin: 4px 0; color: #aebfd5; font-size: .82rem; }
+    .usage {
+      margin: 12px 0;
+      padding: 10px 12px;
+      border: 1px solid #6c86a5;
+      border-radius: 12px;
+      background: #101c34aa;
+      text-align: left;
+    }
+    .usage summary { color: #cfe2ff; cursor: pointer; font-weight: 700; }
+    .usage p { margin: 8px 0 0; font-size: .88rem; }
+
+    button {
+      min-width: 64px;
+      min-height: 48px;
+      border: 1px solid #87a7ce;
+      border-radius: 12px;
+      background: linear-gradient(145deg, #304a6c, #1d304d);
+      color: white;
+      font: inherit;
+      font-size: 1.25rem;
+      touch-action: manipulation;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    button:active { background: #3b5a83; transform: translateY(1px); }
+    button:disabled { cursor: default; opacity: .8; }
+
+    .restart {
+      min-width: 120px;
+      padding: 8px 16px;
+      font-size: 1rem;
+      background: linear-gradient(145deg, #398cff, #2161bd);
+      box-shadow: 0 5px 20px #2678e866;
+    }
+
+    .controls {
+      display: flex;
+      justify-content: center;
+      gap: 18px;
+      margin-top: 14px;
+    }
+    .controls[hidden] { display: none; }
+
+    .controls button { width: min(42vw, 150px); }
+    .status { min-height: 1.5em; margin: 10px 0 0; color: #c4d1e2; }
+
+    @media (max-height: 560px) and (orientation: landscape) {
+      body { padding: 8px 20px; }
+      main { width: min(96vw, 850px); }
+      .controls { margin-top: 6px; }
+      .controls button { min-height: 40px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="message scene" id="home-screen">
+      <h1>Bounce</h1>
+      <p>공을 받아 포인트를 모으고 새로운 아이템을 만나 보세요.</p>
+      <div class="account-box">
+        <p id="account-state" aria-live="polite">로그인하지 않았어요.</p>
+        <label for="account-username">닉네임</label>
+        <input id="account-username" name="username" autocomplete="username" minlength="3" maxlength="16" pattern="[A-Za-z0-9_]{3,16}" placeholder="영문·숫자·밑줄, 3~16자">
+        <label for="account-password">비밀번호</label>
+        <input id="account-password" name="password" type="password" autocomplete="current-password" minlength="8" maxlength="128" placeholder="8자 이상">
+        <div class="account-actions" id="account-actions">
+          <button class="secondary" id="register-button" type="button">계정 만들기</button>
+          <button class="secondary" id="login-button" type="button">로그인</button>
+        </div>
+        <button class="secondary" id="logout-button" type="button" hidden>로그아웃</button>
+        <p class="account-message" id="account-message" aria-live="polite">이메일이나 실명 없이 닉네임으로 가입합니다. 비밀번호를 잊으면 복구할 수 없어요.</p>
+        <div class="friends-panel" id="friends-panel" hidden>
+          <div class="friend-heading">
+            <strong>친구</strong>
+            <button class="secondary" id="friends-refresh-button" type="button">새로고침</button>
+          </div>
+          <div class="friend-add-row">
+            <input id="friend-username" maxlength="16" placeholder="추가할 닉네임" aria-label="친구 닉네임">
+            <button class="secondary" id="friend-request-button" type="button">신청</button>
+          </div>
+          <p class="account-message" id="friend-message" aria-live="polite"></p>
+          <div class="friend-section">
+            <h4>받은 신청</h4>
+            <ul class="friend-list" id="incoming-friends"></ul>
+          </div>
+          <div class="friend-section">
+            <h4>보낸 신청</h4>
+            <ul class="friend-list" id="outgoing-friends"></ul>
+          </div>
+          <div class="friend-section">
+            <h4>친구 목록</h4>
+            <ul class="friend-list" id="friends-list"></ul>
+          </div>
+        </div>
+      </div>
+      <div class="menu-actions">
+        <button class="restart" id="online-play-button" type="button" disabled>온라인 대전 찾기 · 300 포인트</button>
+        <button class="secondary" id="online-cancel-button" type="button" hidden>대전 찾기 취소</button>
+      </div>
+      <p class="online-status" id="online-status" aria-live="polite"></p>
+      <div class="leaderboards" aria-label="리더보드">
+        <section class="leaderboard">
+          <h3>공을 가장 많이 받은 사람</h3>
+          <ol id="catches-leaderboard"><li>기록을 불러오는 중...</li></ol>
+        </section>
+        <section class="leaderboard">
+          <h3>포인트가 가장 많은 사람</h3>
+          <ol id="points-leaderboard"><li>기록을 불러오는 중...</li></ol>
+        </section>
+      </div>
+      <p class="leaderboard-status" id="leaderboard-status" aria-live="polite"></p>
+      <p>온라인 대전은 입장 시 300 포인트가 필요하며, 승리하면 700 포인트를 받습니다.</p>
+      <p>보유 포인트: <span class="points" id="home-points">0</span></p>
+      <div class="menu-actions">
+        <button class="restart" id="start-button" type="button">게임 시작</button>
+        <button class="secondary" id="usage-button" type="button">사용법</button>
+        <button class="secondary" id="shop-open-button" type="button">상점</button>
+        <button class="secondary" id="home-settings-button" type="button">설정</button>
+      </div>
+    </section>
+    <section class="message scene" id="usage-screen" hidden>
+      <h2>사용법</h2>
+      <p>화면을 드래그하거나 방향키로 패들을 움직여 공을 받으세요.</p>
+      <p>공을 받을 때마다 100포인트를 얻고, 일정 횟수마다 공이 분열합니다.</p>
+      <p>공을 10번 받을 때마다 웨이브가 올라가며, 효과 확률과 공 속도가 증가합니다.</p>
+      <p>슬로우와 패들 확장은 같은 확률과 재사용 간격으로 발동합니다.</p>
+      <p>보호막, 포인트 2배, 콤보 포인트, 정밀 조준, 코인 보너스 효과가 무작위로 나타납니다.</p>
+      <p>온라인 대전은 웨이브 1부터 시작하며, 상대 공도 내 화면에 나타납니다. 더 오래 살아남은 플레이어가 승리합니다.</p>
+      <p>공끼리 부딪히면 무작위 각도로 튕기고, 장착한 공마다 고유한 특수 능력이 있습니다.</p>
+      <button class="secondary" id="usage-back-button" type="button">홈으로</button>
+    </section>
+    <section class="message scene" id="shop-screen" hidden>
+      <h2>상점</h2>
+      <p>보유 포인트: <span class="points" id="shop-points">0</span></p>
+      <div class="menu-actions">
+        <button class="secondary" id="balls-shop-button" type="button">공 상점</button>
+        <button class="secondary" id="paddles-shop-button" type="button">패들 상점</button>
+        <button class="secondary" id="backgrounds-shop-button" type="button">배경 상점</button>
+        <button class="secondary" id="shop-home-button" type="button">홈으로</button>
+      </div>
+    </section>
+    <section class="message scene" id="item-shop-screen" hidden>
+      <h2 id="shop-category-title">공 상점</h2>
+      <p>보유 포인트: <span class="points" id="category-points">0</span></p>
+      <p id="shop-description">공의 모양과 색상을 미리 볼 수 있어요.</p>
+      <label class="settings-row shop-sort-row" for="shop-sort">
+        정렬 기준
+        <select id="shop-sort">
+          <option value="name">가나다순</option>
+          <option value="owned">보유 순</option>
+          <option value="price">가격 순</option>
+        </select>
+      </label>
+      <div class="shop-list" id="shop-list"></div>
+      <div class="shop-actions">
+        <button class="secondary" id="category-back-button" type="button">상점으로</button>
+      </div>
+    </section>
+    <section class="message scene" id="settings-screen" hidden>
+      <h2>설정</h2>
+      <div class="settings-list">
+        <label class="settings-row" for="bgm-toggle">배경 음악
+          <input id="bgm-toggle" type="checkbox">
+        </label>
+        <label class="settings-row" for="bgm-volume">음악 음량
+          <input id="bgm-volume" type="range" min="0" max="0.12" step="0.01" value="0.04">
+        </label>
+        <label class="settings-row" for="bgm-track">음악 종류
+          <select id="bgm-track">
+            <option value="arcade">아케이드</option>
+            <option value="dream">드림 웨이브</option>
+            <option value="retro">레트로</option>
+          </select>
+        </label>
+        <label class="settings-row" for="sfx-toggle">효과음
+          <input id="sfx-toggle" type="checkbox" checked>
+        </label>
+        <label class="settings-row" for="sfx-volume">효과음 음량
+          <input id="sfx-volume" type="range" min="0" max="0.12" step="0.01" value="0.04">
+        </label>
+      </div>
+      <button class="secondary" id="settings-back-button" type="button">돌아가기</button>
+    </section>
+    <section id="game-view" class="scene game-view" hidden>
+      <div class="game-toolbar" id="game-toolbar">
+        <button class="secondary icon-button" id="pause-button" type="button" aria-label="일시 정지" title="일시 정지">
+          <span class="pause-glyph" aria-hidden="true"><i></i><i></i></span>
+          <span class="play-glyph" aria-hidden="true"></span>
+        </button>
+        <button class="secondary icon-button" id="game-settings-button" type="button" aria-label="설정" title="설정">⚙</button>
+      </div>
+      <div class="game-frame">
+        <canvas id="game" width="700" height="500" aria-label="공 튕기기 게임"></canvas>
+        <div class="overlay" id="overlay" hidden>
+          <section class="message" id="game-screen">
+            <h2 id="message-title">3</h2>
+            <p id="message-text">준비하세요!</p>
+            <div class="menu-actions">
+              <button class="restart" id="game-again-button" type="button">▶ 다시 시작</button>
+              <div class="continue-action" id="continue-action" hidden>
+                <div class="continue-countdown" id="continue-countdown" role="timer" aria-label="이어하기 남은 시간">
+                  <svg viewBox="0 0 52 52" aria-hidden="true">
+                    <circle class="timer-track" cx="26" cy="26" r="22"></circle>
+                    <circle class="timer-progress" id="continue-progress" cx="26" cy="26" r="22"></circle>
+                  </svg>
+                  <span id="continue-seconds">10초</span>
+                </div>
+                <button class="restart" id="continue-game-button" type="button">500 포인트로 이어하기</button>
+              </div>
+              <button class="secondary" id="home-button" type="button">홈으로</button>
+            </div>
+          </section>
+        </div>
+      </div>
+      <div class="controls" id="controls" aria-label="터치 조작" hidden>
+        <button id="left-button" type="button" aria-label="왼쪽으로 이동">◀</button>
+        <button id="right-button" type="button" aria-label="오른쪽으로 이동">▶</button>
+      </div>
+      <p class="status" id="status" aria-live="polite">받은 횟수: 0</p>
+      <p class="online-status" id="match-status" aria-live="polite" hidden></p>
+    </section>
+  </main>
+
+  <script>
+    (() => {
+      const canvas = document.getElementById("game");
+      const ctx = canvas.getContext("2d");
+      const overlay = document.getElementById("overlay");
+      const title = document.getElementById("message-title");
+      const message = document.getElementById("message-text");
+      const startButton = document.getElementById("start-button");
+      const homeScreen = document.getElementById("home-screen");
+      const usageScreen = document.getElementById("usage-screen");
+      const shopScreen = document.getElementById("shop-screen");
+      const itemShopScreen = document.getElementById("item-shop-screen");
+      const settingsScreen = document.getElementById("settings-screen");
+      const gameView = document.getElementById("game-view");
+      const gameToolbar = document.getElementById("game-toolbar");
+      const gameScreen = document.getElementById("game-screen");
+      const gameAgainButton = document.getElementById("game-again-button");
+      const continueGameButton = document.getElementById("continue-game-button");
+      const continueAction = document.getElementById("continue-action");
+      const continueCountdown = document.getElementById("continue-countdown");
+      const continueSeconds = document.getElementById("continue-seconds");
+      const continueProgress = document.getElementById("continue-progress");
+      const homeButton = document.getElementById("home-button");
+      const shopList = document.getElementById("shop-list");
+      const shopCategoryTitle = document.getElementById("shop-category-title");
+      const shopDescription = document.getElementById("shop-description");
+      const shopSort = document.getElementById("shop-sort");
+      let activeShopCategory = "balls";
+      let shopSortMode = "name";
+      const accountState = document.getElementById("account-state");
+      const accountUsername = document.getElementById("account-username");
+      const accountPassword = document.getElementById("account-password");
+      const accountMessage = document.getElementById("account-message");
+      const onlinePlayButton = document.getElementById("online-play-button");
+      const onlineCancelButton = document.getElementById("online-cancel-button");
+      const onlineStatus = document.getElementById("online-status");
+      const matchStatus = document.getElementById("match-status");
+      const leaderboardStatus = document.getElementById("leaderboard-status");
+      const friendsPanel = document.getElementById("friends-panel");
+      const friendUsername = document.getElementById("friend-username");
+      const friendMessage = document.getElementById("friend-message");
+      let onlineUser = null;
+      let onlineMatch = null;
+      let matchmakingTimer = 0;
+      let matchPollingTimer = 0;
+      let onlineRequestPending = false;
+      let pointsSyncPromise = Promise.resolve();
+      let pointsRevision = 0;
+      const controls = document.getElementById("controls");
+      const status = document.getElementById("status");
+      const pauseButton = document.getElementById("pause-button");
+      const settingsInputs = {
+        bgmEnabled: document.getElementById("bgm-toggle"),
+        bgmVolume: document.getElementById("bgm-volume"),
+        bgmTrack: document.getElementById("bgm-track"),
+        sfxEnabled: document.getElementById("sfx-toggle"),
+        sfxVolume: document.getElementById("sfx-volume")
+      };
+
+      const width = canvas.width;
+      const height = canvas.height;
+      const SAVE_KEY = "bounceProgress";
+      const ballStyles = [
+        { id: "classic", name: "기본 공", shape: "circle", color: "#3986ff", price: 0 },
+        { id: "diamond", name: "다이아 공", shape: "diamond", color: "#bd83ff", price: 500 },
+        { id: "star", name: "별 공", shape: "star", color: "#ffd166", price: 1000 },
+        { id: "ring", name: "링 공", shape: "ring", color: "#51e0cf", price: 1500 },
+        { id: "rainbow", name: "레인보우 공", shape: "rainbow", color: "#ff5d83", price: 12000 },
+        { id: "blackhole", name: "블랙홀 볼", shape: "blackhole", color: "#9b6cff", price: 25000 },
+        { id: "galaxy", name: "갤럭시 공", shape: "galaxy", color: "#a872ff", price: 18000 },
+        { id: "comet", name: "혜성 공", shape: "comet", color: "#74e6ff", price: 14000 },
+        { id: "sun", name: "태양 공", shape: "sun", color: "#ffb52e", price: 22000 },
+        { id: "crystal", name: "크리스탈 공", shape: "crystal", color: "#8df5ff", price: 9000 },
+        { id: "neon", name: "네온 공", shape: "neon", color: "#68fff1", price: 11000 },
+        { id: "ice", name: "아이스 공", shape: "ice", color: "#a7eaff", price: 16000 },
+        { id: "lightning", name: "번개 공", shape: "lightning", color: "#ffe65b", price: 20000 },
+        { id: "chrono", name: "크로노 공", shape: "clock", color: "#ffdb70", price: 32000 },
+        { id: "heart", name: "하트 공", shape: "heart", color: "#ff628f", price: 18000 },
+        { id: "moon", name: "초승달 공", shape: "moon", color: "#e5e9ff", price: 22000 },
+        { id: "planet", name: "행성 공", shape: "planet", color: "#69d8ff", price: 26000 },
+        { id: "hex", name: "육각 공", shape: "hex", color: "#64f0c2", price: 17000 },
+        { id: "flower", name: "꽃 공", shape: "flower", color: "#ff91cf", price: 21000 },
+        { id: "flame", name: "불꽃 공", shape: "flame", color: "#ff744d", price: 27000 },
+        { id: "gear", name: "기어 공", shape: "gear", color: "#e9b957", price: 30000 },
+        { id: "pixel", name: "픽셀 공", shape: "pixel", color: "#76efff", price: 16000 },
+        { id: "prism", name: "프리즘 공", shape: "prism", color: "#c89bff", price: 34000 },
+        { id: "vortex", name: "소용돌이 공", shape: "vortex", color: "#75a7ff", price: 38000 },
+        { id: "jade", name: "비취 공", shape: "hex", color: "#43d9a3", price: 23000 },
+        { id: "ruby", name: "루비 공", shape: "crystal", color: "#ff426b", price: 26000 },
+        { id: "sapphire", name: "사파이어 공", shape: "planet", color: "#5ca6ff", price: 29000 },
+        { id: "coral", name: "산호 공", shape: "flower", color: "#ff8581", price: 25000 },
+        { id: "eclipse", name: "이클립스 공", shape: "moon", color: "#b3a5ff", price: 33000 },
+        { id: "sunflare", name: "태양 폭풍 공", shape: "sun", color: "#ff6b35", price: 36000 },
+        { id: "stardust", name: "별가루 공", shape: "vortex", color: "#74f0e2", price: 40000 },
+        { id: "crimson-gear", name: "크림슨 기어 공", shape: "gear", color: "#ff5673", price: 42000 }
+      ];
+      const ballPowerGroups = {
+        balanced: { name: "균형 반사", description: "추가 강화 없이 안정적으로 튕깁니다." },
+        shield: { name: "보호막", description: "패들에 맞히면 보호막을 충전합니다." },
+        boost: { name: "가속", description: "패들에 맞힌 공이 잠시 빨라집니다." },
+        split: { name: "분열", description: "패들에 맞히면 공 하나를 추가합니다." },
+        slow: { name: "시간 왜곡", description: "패들에 맞히면 잠시 공의 시간이 느려집니다." },
+        wide: { name: "확장", description: "패들에 맞히면 패들이 잠시 넓어집니다." },
+        points: { name: "포인트", description: "패들에 맞히면 보너스 포인트를 얻습니다." },
+        chaos: { name: "무작위 반사", description: "패들에 맞히면 공의 진행 각도를 바꿉니다." },
+        repel: { name: "충격파", description: "패들에 맞히면 주변 공을 무작위 방향으로 밀어냅니다." }
+      };
+      const ballPowerBySkin = {
+        classic: "balanced", diamond: "shield", star: "boost", ring: "repel",
+        rainbow: "split", blackhole: "slow", galaxy: "points", comet: "boost",
+        sun: "wide", crystal: "shield", neon: "boost", ice: "slow",
+        lightning: "chaos", chrono: "slow", heart: "shield", moon: "slow",
+        planet: "repel", hex: "split", flower: "points", flame: "boost",
+        gear: "wide", pixel: "split", prism: "chaos", vortex: "repel",
+        jade: "shield", ruby: "boost", sapphire: "slow", coral: "points",
+        eclipse: "slow", sunflare: "boost", stardust: "points", "crimson-gear": "wide"
+      };
+      const paddleStyles = [
+        { id: "default", name: "기본 패들", color: "#63d6b3", light: "#c8fff3", dark: "#23a88e", price: 0 },
+        { id: "sunset", name: "선셋 패들", color: "#ff7b78", light: "#ffd1a8", dark: "#c83e69", price: 8000 },
+        { id: "neon", name: "네온 패들", color: "#45f5ff", light: "#d8ffff", dark: "#168fae", price: 14000 },
+        { id: "gold", name: "골드 패들", color: "#ffd166", light: "#fff2aa", dark: "#d17b22", price: 25000 },
+        { id: "chrono", name: "크로노 패들", color: "#d8b35d", light: "#fff0a8", dark: "#754c27", shape: "clock", price: 32000 },
+        { id: "ice", name: "빙하 패들", color: "#72d9ff", light: "#e4fbff", dark: "#226b9b", price: 18000 },
+        { id: "plasma", name: "플라스마 패들", color: "#b77aff", light: "#f0d9ff", dark: "#5b2b9a", price: 24000 },
+        { id: "magma", name: "마그마 패들", color: "#ff694f", light: "#ffe0a2", dark: "#9b263c", price: 28000 },
+        { id: "prism", name: "프리즘 패들", color: "#77d9ff", light: "#f4dbff", dark: "#7a62da", price: 36000 },
+        { id: "forest", name: "숲의 패들", color: "#55d69a", light: "#d8ffae", dark: "#166447", price: 20000 },
+        { id: "royal", name: "로열 패들", color: "#f0bf5b", light: "#fff2c0", dark: "#7147a8", price: 42000 },
+        { id: "rose", name: "장미 패들", color: "#f06e9e", light: "#ffe0e8", dark: "#8f315f", price: 22000 },
+        { id: "deepsea", name: "심해 패들", color: "#38b7c8", light: "#c5ffff", dark: "#123d75", price: 26000 },
+        { id: "ivory", name: "상아 패들", color: "#e5d7b6", light: "#fff9e8", dark: "#817760", price: 30000 },
+        { id: "shadow", name: "그림자 패들", color: "#7777b8", light: "#d0d5ff", dark: "#252644", price: 34000 },
+        { id: "sunrise", name: "해돋이 패들", color: "#ff9f56", light: "#fff0a8", dark: "#bd4261", price: 38000 },
+        { id: "cosmic", name: "코스믹 패들", color: "#a773ff", light: "#e5d4ff", dark: "#233b9c", price: 46000 }
+      ];
+      const backgroundStyles = [
+        { id: "default", name: "기본 밤하늘", color: "#182b49", top: "#14233e", middle: "#182b49", bottom: "#101b32", glow: "#3868a3", stars: "#d6ecff", price: 0 },
+        { id: "aurora", name: "오로라", color: "#155e68", top: "#10253b", middle: "#155e68", bottom: "#171b3f", glow: "#42e6c4", stars: "#dcfff4", price: 12000 },
+        { id: "sunset", name: "우주 석양", color: "#a6405a", top: "#301d4d", middle: "#a6405a", bottom: "#f08c46", glow: "#ffb05c", stars: "#fff0ce", price: 18000 },
+        { id: "void", name: "심연", color: "#241449", top: "#080913", middle: "#241449", bottom: "#10172e", glow: "#7755e8", stars: "#dcd5ff", price: 30000 },
+        { id: "chrono", name: "크로노 시계", color: "#5c4c2b", top: "#111827", middle: "#554521", bottom: "#191c2d", glow: "#d7b85c", stars: "#ffe7a0", motif: "clock", price: 38000 },
+        { id: "nebula", name: "성운", color: "#513d9d", top: "#11152d", middle: "#513d9d", bottom: "#211b50", glow: "#dc6fff", stars: "#f2dcff", price: 22000 },
+        { id: "ocean", name: "심해", color: "#14687a", top: "#071b31", middle: "#14687a", bottom: "#061126", glow: "#39d9d3", stars: "#b9fbff", price: 20000 },
+        { id: "sakura", name: "벚꽃 은하", color: "#ad527c", top: "#251d42", middle: "#ad527c", bottom: "#301a47", glow: "#ffb5d2", stars: "#ffe4ee", price: 26000 },
+        { id: "cyber", name: "사이버 시티", color: "#174b69", top: "#090e26", middle: "#174b69", bottom: "#251344", glow: "#35f1e4", stars: "#b8ffff", price: 32000 },
+        { id: "ember", name: "잿불 행성", color: "#81384b", top: "#241326", middle: "#81384b", bottom: "#341d31", glow: "#ff8b4c", stars: "#ffe2aa", price: 30000 },
+        { id: "arctic", name: "오로라 빙원", color: "#347d9b", top: "#10263e", middle: "#347d9b", bottom: "#182b58", glow: "#8df5ff", stars: "#e2ffff", price: 34000 },
+        { id: "desert", name: "달빛 사막", color: "#8b5a55", top: "#20182e", middle: "#8b5a55", bottom: "#30223b", glow: "#f6bb85", stars: "#fff0c7", price: 24000 },
+        { id: "eclipse", name: "일식", color: "#382b63", top: "#080b1b", middle: "#382b63", bottom: "#17142d", glow: "#e1a95e", stars: "#e5dcff", price: 36000 },
+        { id: "forest", name: "반딧불 숲", color: "#276348", top: "#091c27", middle: "#276348", bottom: "#102e35", glow: "#8fe58e", stars: "#dcffbb", price: 28000 },
+        { id: "rose", name: "장미 성운", color: "#8e416c", top: "#1d163a", middle: "#8e416c", bottom: "#371b50", glow: "#ff8fc7", stars: "#ffe2f2", price: 32000 },
+        { id: "stardust", name: "별가루", color: "#435d92", top: "#080f27", middle: "#435d92", bottom: "#171d49", glow: "#9cc6ff", stars: "#fff2b0", price: 40000 },
+        { id: "storm", name: "번개 폭풍", color: "#35527e", top: "#080d1a", middle: "#35527e", bottom: "#161b36", glow: "#83d7ff", stars: "#e6f4ff", price: 44000 }
+      ];
+      const musicTracks = {
+        arcade: { name: "아케이드", tempo: 118, lead: "square", roots: [0, 9, 5, 7], thirds: [4, 3, 4, 4], melody: [0, 7, 12, 7, 4, 7, 12, 16] },
+        dream: { name: "드림 웨이브", tempo: 92, lead: "sine", roots: [0, 5, 9, 7], thirds: [4, 3, 3, 4], melody: [0, 4, 7, 11, 9, 7, 4, 2] },
+        retro: { name: "레트로", tempo: 132, lead: "triangle", roots: [0, 7, 5, 3], thirds: [4, 4, 3, 3], melody: [0, 7, 12, 14, 12, 7, 4, 7] }
+      };
+      let points = 0;
+      let ownedBallIds = ["classic"];
+      let selectedBallId = "classic";
+      let ownedPaddleIds = ["default"];
+      let selectedPaddleId = "default";
+      let ownedBackgroundIds = ["default"];
+      let selectedBackgroundId = "default";
+      let persistenceWarning = "";
+      let bgmEnabled = false;
+      let bgmTrackId = "arcade";
+      let sfxEnabled = true;
+      let bgmVolume = 0.04;
+      let sfxVolume = 0.04;
+      let settingsReturnToGame = false;
+      const paddle = { x: 300, targetX: 300, y: height - 58, width: 128, height: 16, speed: 5.2 };
+      const keys = { left: false, right: false };
+      const BALL_RADIUS = 9;
+      const BOOST_CHANCE = 0.16;
+      const NIGHT_CHANCE = 0.10;
+      const SPLIT_CHANCE = 0.10;
+      const RANDOM_BOUNCE_CHANCE = 0.25;
+      const HITS_PER_WAVE = 10;
+      const WAVE_CHANCE_STEP = 0.02;
+      const MAX_EFFECT_CHANCE = 0.6;
+      const WAVE_BUFF_CHANCE = 0.08;
+      const SPECIAL_EFFECT_CHANCE = 0.08;
+      const WAVE_SPEED_STEP = 0.06;
+      const MAX_WAVE_SPEED_MULTIPLIER = 1.6;
+      const BOOST_MULTIPLIER = 1.35;
+      const BOOST_DURATION = 4000;
+      const NIGHT_DURATION = 5000;
+      const FLASH_DURATION = 1500;
+      const SLOW_DURATION = 2800;
+      const WIDE_PADDLE_DURATION = 5000;
+      const BUFF_COOLDOWN = 8000;
+      const PRECISION_DURATION = 6000;
+      const CONTINUE_WINDOW = 10000;
+      const TIMER_CIRCUMFERENCE = 138.23;
+      const stars = Array.from({ length: 48 }, () => ({
+        x: Math.random() * width,
+        y: Math.random() * height,
+        radius: 0.5 + Math.random() * 1.4,
+        alpha: 0.2 + Math.random() * 0.55
+      }));
+      let balls = [];
+      let opponentBalls = [];
+      let running = false;
+      let isPaused = false;
+      let countdownActive = false;
+      let score = 0;
+      let currentWave = 1;
+      let lastTime = 0;
+      let animationId = 0;
+      let continueCountdownTimer = 0;
+      let continueUntil = 0;
+      let pointerActive = false;
+      let splitCharge = 0;
+      let splitHitsRemaining = 0;
+      let splitPending = false;
+      let mergeHitCharge = 0;
+      let splitEffectUntil = 0;
+      let nightUntil = 0;
+      let countdownUntil = 0;
+      let lastCountdownNumber = 0;
+      let flashStarted = 0;
+      let flashUntil = 0;
+      let lastFlashAt = -Infinity;
+      let slowUntil = 0;
+      let lastSlowAt = -Infinity;
+      let widePaddleUntil = 0;
+      let lastWideAt = -Infinity;
+      let shieldCharges = 0;
+      let doublePointsRemaining = 0;
+      let comboPointsRemaining = 0;
+      let precisionUntil = 0;
+      let audioContext = null;
+      let bgmMasterGain = null;
+      let bgmOscillators = [];
+      let bgmNoiseBuffer = null;
+      let bgmTimer = 0;
+      let bgmPlayingTrack = "";
+      let bgmNextNoteTime = 0;
+      let bgmStep = 0;
+
+      function waveForScore(hits) {
+        return Math.floor(hits / HITS_PER_WAVE) + 1;
+      }
+
+      function waveSpeedMultiplier(wave) {
+        return Math.min(1 + (wave - 1) * WAVE_SPEED_STEP, MAX_WAVE_SPEED_MULTIPLIER);
+      }
+
+      function effectChance(baseChance) {
+        return Math.min(baseChance + (currentWave - 1) * WAVE_CHANCE_STEP, MAX_EFFECT_CHANCE);
+      }
+
+      function prepareAudio() {
+        if (!window.AudioContext) {
+          console.error("이 브라우저는 Web Audio API를 지원하지 않습니다.");
+          return false;
+        }
+        if (!audioContext) audioContext = new AudioContext();
+        if (audioContext.state === "suspended") {
+          audioContext.resume().catch(error => {
+            console.error("오디오를 시작하지 못했습니다.", error);
+          });
+        }
+        return true;
+      }
+
+      function playFlashTone() {
+        if (!sfxEnabled || sfxVolume <= 0 || !audioContext || audioContext.state !== "running") return;
+        const now = audioContext.currentTime;
+        for (let offset = 0; offset < FLASH_DURATION / 1000; offset += 0.3) {
+          const oscillator = audioContext.createOscillator();
+          const volume = audioContext.createGain();
+          const beepStart = now + offset;
+          oscillator.type = "sine";
+          oscillator.frequency.setValueAtTime(988, beepStart);
+          volume.gain.setValueAtTime(0.0001, beepStart);
+          volume.gain.exponentialRampToValueAtTime(Math.min(sfxVolume, 0.06), beepStart + 0.025);
+          volume.gain.exponentialRampToValueAtTime(0.0001, beepStart + 0.18);
+          oscillator.connect(volume);
+          volume.connect(audioContext.destination);
+          oscillator.start(beepStart);
+          oscillator.stop(beepStart + 0.19);
+        }
+      }
+
+      function registerBgmNode(node, cleanup) {
+        bgmOscillators.push(node);
+        node.onended = () => {
+          node.disconnect();
+          if (cleanup) cleanup();
+          bgmOscillators = bgmOscillators.filter(activeNode => activeNode !== node);
+        };
+      }
+
+      function playMusicTone(midi, startTime, duration, waveform, volume) {
+        const oscillator = audioContext.createOscillator();
+        const envelope = audioContext.createGain();
+        oscillator.type = waveform;
+        oscillator.frequency.setValueAtTime(440 * Math.pow(2, (midi - 69) / 12), startTime);
+        envelope.gain.setValueAtTime(0.0001, startTime);
+        envelope.gain.linearRampToValueAtTime(volume, startTime + Math.min(0.025, duration / 4));
+        envelope.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+        oscillator.connect(envelope);
+        envelope.connect(bgmMasterGain);
+        registerBgmNode(oscillator, () => envelope.disconnect());
+        oscillator.start(startTime);
+        oscillator.stop(startTime + duration + 0.01);
+      }
+
+      function playMusicNoise(startTime, duration, cutoff, volume) {
+        const source = audioContext.createBufferSource();
+        const filter = audioContext.createBiquadFilter();
+        const envelope = audioContext.createGain();
+        source.buffer = bgmNoiseBuffer;
+        filter.type = "highpass";
+        filter.frequency.setValueAtTime(cutoff, startTime);
+        envelope.gain.setValueAtTime(volume, startTime);
+        envelope.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+        source.connect(filter);
+        filter.connect(envelope);
+        envelope.connect(bgmMasterGain);
+        registerBgmNode(source, () => {
+          filter.disconnect();
+          envelope.disconnect();
+        });
+        source.start(startTime);
+        source.stop(startTime + duration + 0.01);
+      }
+
+      function playKick(startTime) {
+        const oscillator = audioContext.createOscillator();
+        const envelope = audioContext.createGain();
+        oscillator.type = "sine";
+        oscillator.frequency.setValueAtTime(130, startTime);
+        oscillator.frequency.exponentialRampToValueAtTime(48, startTime + 0.14);
+        envelope.gain.setValueAtTime(0.0001, startTime);
+        envelope.gain.linearRampToValueAtTime(0.22, startTime + 0.008);
+        envelope.gain.exponentialRampToValueAtTime(0.0001, startTime + 0.18);
+        oscillator.connect(envelope);
+        envelope.connect(bgmMasterGain);
+        registerBgmNode(oscillator, () => envelope.disconnect());
+        oscillator.start(startTime);
+        oscillator.stop(startTime + 0.19);
+      }
+
+      function scheduleMusicStep(track, step, startTime) {
+        const bar = Math.floor(step / 16);
+        const position = step % 16;
+        const chordIndex = bar % track.roots.length;
+        const root = track.roots[chordIndex];
+        const third = track.thirds[chordIndex];
+        const beatDuration = 60 / track.tempo;
+
+        if (position === 0) {
+          playMusicTone(48 + root, startTime, beatDuration * 3.6, "sine", 0.07);
+          playMusicTone(48 + root + third, startTime, beatDuration * 3.6, "sine", 0.055);
+          playMusicTone(55 + root, startTime, beatDuration * 3.6, "sine", 0.05);
+        }
+        if (position % 4 === 0) {
+          playMusicTone(36 + root, startTime, beatDuration * 0.78, "triangle", 0.22);
+        }
+        if (position % 2 === 0) {
+          const melodyNote = track.melody[position / 2];
+          if (melodyNote !== null) {
+            playMusicTone(72 + root + melodyNote, startTime, beatDuration * 0.42, track.lead, 0.11);
+          }
+          playMusicNoise(startTime, 0.045, 7000, 0.018);
+        }
+        if (position === 0 || position === 8) playKick(startTime);
+        if (position === 4 || position === 12) playMusicNoise(startTime, 0.14, 1400, 0.055);
+      }
+
+      function startBgm() {
+        if (!bgmEnabled || !prepareAudio()) return;
+        if (bgmMasterGain && bgmPlayingTrack === bgmTrackId) {
+          bgmMasterGain.gain.setTargetAtTime(bgmVolume, audioContext.currentTime, 0.08);
+          return;
+        }
+        stopBgm();
+        const track = musicTracks[bgmTrackId] || musicTracks.arcade;
+        bgmMasterGain = audioContext.createGain();
+        bgmMasterGain.gain.setValueAtTime(0.0001, audioContext.currentTime);
+        bgmMasterGain.connect(audioContext.destination);
+        bgmMasterGain.gain.setTargetAtTime(bgmVolume, audioContext.currentTime, 0.2);
+        bgmPlayingTrack = bgmTrackId;
+        if (!bgmNoiseBuffer) {
+          const sampleCount = Math.floor(audioContext.sampleRate * 0.3);
+          bgmNoiseBuffer = audioContext.createBuffer(1, sampleCount, audioContext.sampleRate);
+          const samples = bgmNoiseBuffer.getChannelData(0);
+          for (let index = 0; index < sampleCount; index += 1) {
+            samples[index] = Math.random() * 2 - 1;
+          }
+        }
+        bgmStep = 0;
+        bgmNextNoteTime = audioContext.currentTime + 0.05;
+        const scheduleAhead = () => {
+          const stepLength = 60 / track.tempo / 4;
+          while (bgmNextNoteTime < audioContext.currentTime + 0.12) {
+            scheduleMusicStep(track, bgmStep, bgmNextNoteTime);
+            bgmNextNoteTime += stepLength;
+            bgmStep = (bgmStep + 1) % 64;
+          }
+        };
+        scheduleAhead();
+        bgmTimer = window.setInterval(scheduleAhead, 25);
+      }
+
+      function stopBgm() {
+        if (bgmTimer) {
+          window.clearInterval(bgmTimer);
+          bgmTimer = 0;
+        }
+        if (!audioContext || !bgmMasterGain) {
+          bgmPlayingTrack = "";
+          return;
+        }
+        const now = audioContext.currentTime;
+        const gain = bgmMasterGain;
+        gain.gain.setTargetAtTime(0.0001, now, 0.06);
+        bgmMasterGain = null;
+        bgmPlayingTrack = "";
+        bgmOscillators = [];
+        window.setTimeout(() => gain.disconnect(), 500);
+      }
+
+      function updateBgm() {
+        if (bgmEnabled) startBgm();
+        else stopBgm();
+      }
+
+      function updateSettingsUI() {
+        settingsInputs.bgmEnabled.checked = bgmEnabled;
+        settingsInputs.bgmVolume.value = bgmVolume;
+        settingsInputs.bgmTrack.value = bgmTrackId;
+        settingsInputs.sfxEnabled.checked = sfxEnabled;
+        settingsInputs.sfxVolume.value = sfxVolume;
+      }
+
+      function ballStyleFor(id) {
+        return ballStyles.find(style => style.id === id) || ballStyles[0];
+      }
+
+      function ballPowerFor(id) {
+        return ballPowerGroups[ballPowerBySkin[id] || "balanced"];
+      }
+
+      function newBallId() {
+        return window.crypto && window.crypto.randomUUID
+          ? window.crypto.randomUUID()
+          : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+      }
+
+      function applyBallPower(ball, time, notices, newBalls, activeBalls) {
+        const powerType = ballPowerBySkin[ball.styleId] || "balanced";
+        if (powerType === "balanced" || time < (ball.powerReadyAt || 0)) return 0;
+        if (powerType === "shield" && shieldCharges >= 2) return 0;
+        if (powerType === "split" && activeBalls.length >= 8) return 0;
+        ball.powerReadyAt = time + 6000;
+
+        if (powerType === "shield") {
+          shieldCharges += 1;
+          notices.push("공 능력: 보호막");
+        } else if (powerType === "boost") {
+          if (!ball.boostUntil) {
+            ball.vx *= BOOST_MULTIPLIER;
+            ball.vy *= BOOST_MULTIPLIER;
+          }
+          ball.boostUntil = time + BOOST_DURATION;
+          notices.push("공 능력: 가속");
+        } else if (powerType === "split") {
+          splitHitsRemaining = Math.max(splitHitsRemaining, 3);
+          mergeHitCharge = 0;
+          splitEffectUntil = time + 900;
+          const direction = Math.random() < 0.5 ? -1 : 1;
+          newBalls.push({
+            ...ball,
+            id: newBallId(),
+            x: Math.max(ball.radius, Math.min(width - ball.radius, ball.x + direction * ball.radius * 2.4)),
+            vx: -ball.vx,
+            vy: ball.vy * 0.9,
+            powerReadyAt: time + 6000,
+            trail: []
+          });
+          notices.push("공 능력: 추가 공");
+        } else if (powerType === "slow") {
+          slowUntil = time + SLOW_DURATION;
+          notices.push("공 능력: 시간 왜곡");
+        } else if (powerType === "wide") {
+          widePaddleUntil = time + WIDE_PADDLE_DURATION;
+          notices.push("공 능력: 패들 확장");
+        } else if (powerType === "points") {
+          notices.push("공 능력: 포인트 +250");
+          return 250;
+        } else if (powerType === "chaos") {
+          const speed = Math.hypot(ball.vx, ball.vy);
+          const angle = Math.PI + Math.random() * Math.PI;
+          ball.vx = Math.cos(angle) * speed;
+          ball.vy = Math.sin(angle) * speed;
+          notices.push("공 능력: 무작위 반사");
+        } else if (powerType === "repel") {
+          for (const otherBall of activeBalls) {
+            if (otherBall === ball) continue;
+            const speed = Math.hypot(otherBall.vx, otherBall.vy);
+            const angle = Math.atan2(otherBall.y - ball.y, otherBall.x - ball.x) +
+              (Math.random() - 0.5) * Math.PI / 3;
+            otherBall.vx = Math.cos(angle) * speed;
+            otherBall.vy = Math.sin(angle) * speed;
+          }
+          notices.push("공 능력: 충격파");
+        }
+        return 0;
+      }
+
+      function effectivePaddleWidth(time = performance.now()) {
+        return time < widePaddleUntil ? paddle.width * 1.4 : paddle.width;
+      }
+
+      function currentPaddleStyle() {
+        return paddleStyles.find(style => style.id === selectedPaddleId) || paddleStyles[0];
+      }
+
+      function currentBackgroundStyle() {
+        return backgroundStyles.find(style => style.id === selectedBackgroundId) || backgroundStyles[0];
+      }
+
+      function updatePointsDisplay() {
+        document.getElementById("home-points").textContent = points;
+        document.getElementById("shop-points").textContent = points;
+        document.getElementById("category-points").textContent = points;
+        continueGameButton.disabled = points < 500;
+      }
+
+      function applyAccountPoints(value) {
+        if (!Number.isSafeInteger(value) || value < 0) {
+          throw new Error("서버 포인트 데이터가 올바르지 않습니다.");
+        }
+        pointsRevision += 1;
+        points = value;
+        persistProgress();
+        updatePointsDisplay();
+      }
+
+      function changePoints(delta) {
+        points = Math.max(0, points + delta);
+        const revision = ++pointsRevision;
+        persistProgress();
+        updatePointsDisplay();
+        if (!onlineUser) return Promise.resolve();
+
+        const update = pointsSyncPromise.then(async () => {
+          const result = await onlineApi("/api/points", {
+            method: "POST",
+            body: JSON.stringify({ delta })
+          });
+          if (revision === pointsRevision) {
+            points = result.points;
+            persistProgress();
+            updatePointsDisplay();
+          }
+        });
+        pointsSyncPromise = update.catch(error => {
+          onlineStatus.textContent = `포인트 동기화 실패: ${error.message}`;
+        });
+        return pointsSyncPromise;
+      }
+
+      async function loadLeaderboards() {
+        const catchesList = document.getElementById("catches-leaderboard");
+        const pointsList = document.getElementById("points-leaderboard");
+        try {
+          const result = await onlineApi("/api/leaderboards");
+          const render = (list, entries, valueLabel) => {
+            list.replaceChildren();
+            if (entries.length === 0) {
+              const empty = document.createElement("li");
+              empty.textContent = "아직 등록된 기록이 없습니다.";
+              list.append(empty);
+              return;
+            }
+            for (const entry of entries) {
+              const row = document.createElement("li");
+              const value = document.createElement("span");
+              row.append(document.createTextNode(entry.username), value);
+              value.textContent = `${entry.value.toLocaleString()} ${valueLabel}`;
+              list.append(row);
+            }
+          };
+          render(catchesList, result.mostCaught, "회");
+          render(pointsList, result.mostPoints, "포인트");
+          leaderboardStatus.textContent = "";
+        } catch (error) {
+          leaderboardStatus.textContent = `리더보드를 불러오지 못했습니다: ${error.message}`;
+        }
+      }
+
+      async function submitBestCatches() {
+        if (!onlineUser) return;
+        try {
+          await pointsSyncPromise;
+          await onlineApi("/api/progress", {
+            method: "POST",
+            body: JSON.stringify({ bestCatches: score })
+          });
+          await loadLeaderboards();
+        } catch (error) {
+          leaderboardStatus.textContent = `기록 저장 실패: ${error.message}`;
+        }
+      }
+
+      function persistProgress() {
+        try {
+          localStorage.setItem(SAVE_KEY, JSON.stringify({
+            points,
+            ownedBallIds,
+            selectedBallId,
+            ownedPaddleIds,
+            selectedPaddleId,
+            ownedBackgroundIds,
+            selectedBackgroundId,
+            settings: { bgmEnabled, bgmTrackId, sfxEnabled, bgmVolume, sfxVolume }
+          }));
+        } catch (error) {
+          persistenceWarning = "저장 오류: " + error.message;
+          console.error("게임 진행 상황을 저장하지 못했습니다.", error);
+          status.textContent = persistenceWarning;
+        }
+      }
+
+      function loadProgress() {
+        try {
+          const serialized = localStorage.getItem(SAVE_KEY);
+          if (!serialized) return;
+          const saved = JSON.parse(serialized);
+          if (!Number.isSafeInteger(saved.points) || saved.points < 0 ||
+              !Array.isArray(saved.ownedBallIds)) {
+            throw new Error("저장 데이터 형식이 올바르지 않습니다.");
+          }
+          const validIds = new Set(ballStyles.map(style => style.id));
+          ownedBallIds = [...new Set(["classic", ...saved.ownedBallIds.filter(id => validIds.has(id))])];
+          points = saved.points;
+          selectedBallId = ownedBallIds.includes(saved.selectedBallId) ? saved.selectedBallId : "classic";
+          const validPaddles = new Set(paddleStyles.map(style => style.id));
+          ownedPaddleIds = [...new Set(["default", ...(Array.isArray(saved.ownedPaddleIds) ? saved.ownedPaddleIds.filter(id => validPaddles.has(id)) : [])])];
+          selectedPaddleId = ownedPaddleIds.includes(saved.selectedPaddleId) ? saved.selectedPaddleId : "default";
+          const validBackgrounds = new Set(backgroundStyles.map(style => style.id));
+          ownedBackgroundIds = [...new Set(["default", ...(Array.isArray(saved.ownedBackgroundIds) ? saved.ownedBackgroundIds.filter(id => validBackgrounds.has(id)) : [])])];
+          selectedBackgroundId = ownedBackgroundIds.includes(saved.selectedBackgroundId) ? saved.selectedBackgroundId : "default";
+          if (saved.settings && typeof saved.settings === "object") {
+            bgmEnabled = saved.settings.bgmEnabled === true;
+            sfxEnabled = saved.settings.sfxEnabled !== false;
+            if (Object.prototype.hasOwnProperty.call(musicTracks, saved.settings.bgmTrackId)) {
+              bgmTrackId = saved.settings.bgmTrackId;
+            }
+            if (Number.isFinite(saved.settings.bgmVolume)) {
+              bgmVolume = Math.max(0, Math.min(0.12, saved.settings.bgmVolume));
+            }
+            if (Number.isFinite(saved.settings.sfxVolume)) {
+              sfxVolume = Math.max(0, Math.min(0.12, saved.settings.sfxVolume));
+            }
+          }
+        } catch (error) {
+          persistenceWarning = "저장 데이터를 불러오지 못했습니다: " + error.message;
+          console.error("게임 진행 상황을 불러오지 못했습니다.", error);
+          status.textContent = persistenceWarning;
+        }
+      }
+
+      function getShopCategory(category) {
+        if (category === "paddles") {
+          return {
+            items: paddleStyles,
+            ownedIds: ownedPaddleIds,
+            selectedId: selectedPaddleId,
+            title: "패들 상점",
+            description: "구매한 패들의 디자인과 색상이 게임에 적용됩니다."
+          };
+        }
+        if (category === "backgrounds") {
+          return {
+            items: backgroundStyles,
+            ownedIds: ownedBackgroundIds,
+            selectedId: selectedBackgroundId,
+            title: "배경 상점",
+            description: "구매한 배경 테마는 게임에 적용됩니다."
+          };
+        }
+        return {
+          items: ballStyles,
+          ownedIds: ownedBallIds,
+          selectedId: selectedBallId,
+          title: "공 상점",
+          description: "공의 모양과 색상을 미리 볼 수 있어요."
+        };
+      }
+
+      function selectShopItem(category, id) {
+        if (category === "paddles") selectedPaddleId = id;
+        else if (category === "backgrounds") selectedBackgroundId = id;
+        else selectedBallId = id;
+      }
+
+      function addOwnedShopItem(category, id) {
+        if (category === "paddles") ownedPaddleIds.push(id);
+        else if (category === "backgrounds") ownedBackgroundIds.push(id);
+        else ownedBallIds.push(id);
+      }
+
+      async function onlineApi(path, options = {}) {
+        let response;
+        try {
+          response = await fetch(path, {
+            credentials: "same-origin",
+            ...options,
+            headers: {
+              "Content-Type": "application/json",
+              ...(options.headers || {})
+            }
+          });
+        } catch (error) {
+          throw new Error("온라인 서버에 연결할 수 없습니다. Bounce 폴더에서 `python server.py`를 실행했는지 확인해 주세요.");
+        }
+        const responseText = await response.text();
+        let data;
+        try {
+          data = responseText ? JSON.parse(responseText) : {};
+        } catch (error) {
+          const detail = responseText.trim().slice(0, 120).replace(/[.]+$/, "");
+          if (!response.ok) {
+            throw new Error(
+              `온라인 서버가 ${response.status} 오류를 반환했습니다${detail ? `: ${detail}` : ""}. ` +
+              "`bounce.html`을 Live Server나 파일로 열지 말고 `python server.py`로 실행해 주세요."
+            );
+          }
+          throw new Error("온라인 서버 응답 형식이 올바르지 않습니다. `python server.py`로 실행해 주세요.");
+        }
+        if (!response.ok) throw new Error(data.error || "온라인 요청에 실패했습니다.");
+        return data;
+      }
+
+      function updateAccountUi() {
+        const loggedIn = Boolean(onlineUser);
+        accountState.textContent = loggedIn
+          ? `${onlineUser} 계정으로 로그인했어요.`
+          : "로그인하지 않았어요.";
+        accountUsername.hidden = loggedIn;
+        accountPassword.hidden = loggedIn;
+        document.querySelector('label[for="account-username"]').hidden = loggedIn;
+        document.querySelector('label[for="account-password"]').hidden = loggedIn;
+        document.getElementById("account-actions").hidden = loggedIn;
+        document.getElementById("logout-button").hidden = !loggedIn;
+        friendsPanel.hidden = !loggedIn;
+        onlinePlayButton.disabled = !loggedIn || Boolean(onlineMatch);
+      }
+
+      async function refreshAccount() {
+        try {
+          let result = await onlineApi("/api/me");
+          onlineUser = result.username;
+          if (onlineUser) {
+            if (!result.pointsInitialized) {
+              result = await onlineApi("/api/points/initialize", {
+                method: "POST",
+                body: JSON.stringify({ points })
+              });
+            }
+            applyAccountPoints(result.points);
+          }
+          updateAccountUi();
+          if (onlineUser) {
+            await loadFriends();
+          } else {
+            accountMessage.textContent = "닉네임과 비밀번호로 가입하거나 로그인하세요.";
+          }
+        } catch (error) {
+          onlineUser = null;
+          updateAccountUi();
+          accountMessage.textContent = "온라인 서버에 연결되지 않았어요. server.py를 실행해 주세요.";
+        }
+      }
+
+      async function authenticate(mode) {
+        accountMessage.textContent = "";
+        try {
+          const result = await onlineApi(`/api/${mode}`, {
+            method: "POST",
+            body: JSON.stringify({
+              username: accountUsername.value.trim(),
+              password: accountPassword.value,
+              points
+            })
+          });
+          onlineUser = result.username;
+          applyAccountPoints(result.points);
+          accountPassword.value = "";
+          accountMessage.textContent = mode === "register"
+            ? "계정을 만들고 로그인했어요. 비밀번호를 잊으면 복구할 수 없습니다."
+            : "로그인했습니다.";
+          updateAccountUi();
+          await loadFriends();
+          await loadLeaderboards();
+        } catch (error) {
+          accountMessage.textContent = error.message;
+        }
+      }
+
+      function makeFriendRow(username, actions) {
+        const row = document.createElement("li");
+        row.className = "friend-row";
+        const name = document.createElement("span");
+        name.textContent = username;
+        const actionGroup = document.createElement("span");
+        actionGroup.className = "friend-row-actions";
+        for (const action of actions) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "secondary";
+          button.textContent = action.label;
+          button.addEventListener("click", action.onClick);
+          actionGroup.append(button);
+        }
+        row.append(name, actionGroup);
+        return row;
+      }
+
+      function renderFriendLists(data) {
+        const friendsList = document.getElementById("friends-list");
+        const incomingList = document.getElementById("incoming-friends");
+        const outgoingList = document.getElementById("outgoing-friends");
+        friendsList.replaceChildren();
+        incomingList.replaceChildren();
+        outgoingList.replaceChildren();
+        for (const username of data.friends) {
+          friendsList.append(makeFriendRow(username, [{
+            label: "삭제",
+            onClick: () => changeFriend(`/api/friends/${encodeURIComponent(username)}`, "DELETE", `${username} 님을 친구에서 삭제했어요.`)
+          }]));
+        }
+        for (const username of data.incoming) {
+          incomingList.append(makeFriendRow(username, [
+            {
+              label: "수락",
+              onClick: () => changeFriend(
+                `/api/friend-requests/${encodeURIComponent(username)}/accept`,
+                "POST",
+                `${username} 님과 친구가 되었어요.`,
+                "{}"
+              )
+            },
+            {
+              label: "거절",
+              onClick: () => changeFriend(
+                `/api/friend-requests/${encodeURIComponent(username)}`,
+                "DELETE",
+                `${username} 님의 신청을 거절했어요.`
+              )
+            }
+          ]));
+        }
+        for (const username of data.outgoing) {
+          outgoingList.append(makeFriendRow(username, [{
+            label: "취소",
+            onClick: () => changeFriend(
+              `/api/friend-requests/${encodeURIComponent(username)}`,
+              "DELETE",
+              `${username} 님에게 보낸 신청을 취소했어요.`
+            )
+          }]));
+        }
+        for (const [list, emptyMessage] of [
+          [friendsList, "아직 친구가 없습니다."],
+          [incomingList, "받은 신청이 없습니다."],
+          [outgoingList, "보낸 신청이 없습니다."]
+        ]) {
+          if (!list.children.length) {
+            const emptyRow = document.createElement("li");
+            emptyRow.textContent = emptyMessage;
+            emptyRow.className = "hint";
+            list.append(emptyRow);
+          }
+        }
+      }
+
+      async function loadFriends() {
+        if (!onlineUser) return;
+        try {
+          const data = await onlineApi("/api/friends");
+          renderFriendLists(data);
+          return true;
+        } catch (error) {
+          friendMessage.textContent = error.message;
+          return false;
+        }
+      }
+
+      async function changeFriend(path, method, successMessage, body) {
+        try {
+          await onlineApi(path, {
+            method,
+            ...(body ? { body } : {})
+          });
+          await loadFriends();
+          friendMessage.textContent = successMessage;
+        } catch (error) {
+          friendMessage.textContent = error.message;
+        }
+      }
+
+      async function sendFriendRequest() {
+        const username = friendUsername.value.trim();
+        try {
+          const result = await onlineApi("/api/friend-requests", {
+            method: "POST",
+            body: JSON.stringify({ username })
+          });
+          friendUsername.value = "";
+          await loadFriends();
+          friendMessage.textContent = result.state === "friends"
+            ? `${result.username} 님과 친구가 되었어요.`
+            : `${result.username} 님에게 친구 신청을 보냈어요.`;
+        } catch (error) {
+          friendMessage.textContent = error.message;
+        }
+      }
+
+      async function logout() {
+        try {
+          await onlineApi("/api/logout", { method: "POST", body: "{}" });
+          onlineUser = null;
+          accountMessage.textContent = "로그아웃했습니다.";
+          onlineStatus.textContent = "";
+          friendMessage.textContent = "";
+          renderFriendLists({ friends: [], incoming: [], outgoing: [] });
+          updateAccountUi();
+        } catch (error) {
+          accountMessage.textContent = error.message;
+        }
+      }
+
+      async function enterOnlineMatch(matchId, accountPoints) {
+        window.clearInterval(matchmakingTimer);
+        matchmakingTimer = 0;
+        onlineCancelButton.hidden = true;
+        if (Number.isSafeInteger(accountPoints) && accountPoints >= 0) {
+          applyAccountPoints(accountPoints);
+        }
+        onlineMatch = { id: matchId, opponent: "상대 플레이어", opponentScore: 0 };
+        matchStatus.hidden = false;
+        matchStatus.textContent = "상대를 기다리는 중...";
+        updateAccountUi();
+        start();
+        window.clearInterval(matchPollingTimer);
+        matchPollingTimer = window.setInterval(syncOnlineMatch, 120);
+        syncOnlineMatch();
+      }
+
+      async function findOnlineMatch() {
+        onlinePlayButton.disabled = true;
+        onlineStatus.textContent = "대전 상대를 찾고 있어요...";
+        try {
+          await pointsSyncPromise;
+          const result = await onlineApi("/api/matchmaking", {
+            method: "POST",
+            body: "{}"
+          });
+          if (result.state === "matched") {
+            await enterOnlineMatch(result.matchId, result.points);
+            return;
+          }
+          onlineCancelButton.hidden = false;
+          matchmakingTimer = window.setInterval(checkMatchmaking, 1200);
+          await checkMatchmaking();
+        } catch (error) {
+          onlineStatus.textContent = error.message;
+          onlinePlayButton.disabled = false;
+        }
+      }
+
+      async function checkMatchmaking() {
+        try {
+          const result = await onlineApi("/api/matchmaking");
+          if (result.state === "matched") {
+            await enterOnlineMatch(result.matchId, result.points);
+          } else if (result.state === "idle") {
+            onlineStatus.textContent = "대기열에서 나왔어요. 다시 대전을 찾아주세요.";
+            window.clearInterval(matchmakingTimer);
+            matchmakingTimer = 0;
+            onlineCancelButton.hidden = true;
+            onlinePlayButton.disabled = false;
+          } else {
+            onlineStatus.textContent = "대전 상대를 찾고 있어요...";
+          }
+        } catch (error) {
+          onlineStatus.textContent = error.message;
+          window.clearInterval(matchmakingTimer);
+          matchmakingTimer = 0;
+          onlineCancelButton.hidden = true;
+          onlinePlayButton.disabled = false;
+        }
+      }
+
+      async function cancelMatchmaking() {
+        try {
+          await onlineApi("/api/matchmaking", { method: "DELETE" });
+          window.clearInterval(matchmakingTimer);
+          matchmakingTimer = 0;
+          onlineCancelButton.hidden = true;
+          onlineStatus.textContent = "대전 찾기를 취소했어요.";
+          onlinePlayButton.disabled = !onlineUser;
+        } catch (error) {
+          onlineStatus.textContent = error.message;
+        }
+      }
+
+      async function syncOnlineMatch(finished = false) {
+        if (!onlineMatch || onlineRequestPending) return;
+        onlineRequestPending = true;
+        const match = onlineMatch;
+        try {
+          const playerFinished = finished || (!running && !countdownActive && !isPaused);
+          const ownBalls = playerFinished ? [] : balls.filter(ball =>
+            !ball.isOpponent && ball.x >= 0 && ball.x <= width && ball.y >= 0 && ball.y <= height
+          ).slice(0, 24).map(ball => ({
+            id: ball.id,
+            x: ball.x,
+            y: ball.y,
+            vx: ball.vx,
+            vy: ball.vy,
+            radius: ball.radius,
+            styleId: ball.styleId || selectedBallId,
+            boosted: ball.boostUntil > performance.now()
+          }));
+          const result = await onlineApi(`/api/matches/${encodeURIComponent(match.id)}/state`, {
+            method: "POST",
+            body: JSON.stringify({
+              score,
+              finished: playerFinished,
+              balls: ownBalls
+            })
+          });
+          if (onlineMatch !== match) return;
+          updateOpponentBalls(result.balls);
+          match.opponent = result.opponent;
+          match.opponentScore = result.opponentScore;
+          matchStatus.textContent = result.state === "completed"
+            ? result.winner === "draw"
+              ? `무승부 · ${formatSurvivalTime(result.survivalTime)} : ${formatSurvivalTime(result.opponentSurvivalTime)}`
+              : result.winner === "you"
+                ? `승리! 생존 ${formatSurvivalTime(result.survivalTime)} : ${formatSurvivalTime(result.opponentSurvivalTime)}`
+                : `패배 · 생존 ${formatSurvivalTime(result.survivalTime)} : ${formatSurvivalTime(result.opponentSurvivalTime)}`
+            : `${result.opponent} · 받은 횟수 ${result.opponentScore} · 생존 ${formatSurvivalTime(result.opponentSurvivalTime)} · ${result.opponentOnline ? "접속 중" : "연결 대기 중"}`;
+          if (result.state === "completed") {
+            window.clearInterval(matchPollingTimer);
+            matchPollingTimer = 0;
+            await pointsSyncPromise;
+            const account = await onlineApi("/api/me");
+            if (account.username === onlineUser) applyAccountPoints(account.points);
+            await loadLeaderboards();
+            if (!running && !countdownActive) {
+              title.textContent = result.winner === "you" ? "대전 승리" :
+                result.winner === "draw" ? "대전 무승부" : "대전 패배";
+              message.textContent =
+                `내 생존 ${formatSurvivalTime(result.survivalTime)} · ` +
+                `${result.opponent} 생존 ${formatSurvivalTime(result.opponentSurvivalTime)}로 대전이 끝났어요.` +
+                (result.winner === "you" ? " 승리 보상 700 포인트를 받았습니다." : "");
+              gameAgainButton.hidden = true;
+              continueAction.hidden = true;
+            }
+            onlineMatch = null;
+            updateAccountUi();
+          }
+        } catch (error) {
+          matchStatus.textContent = `대전 서버 연결 오류: ${error.message}`;
+        } finally {
+          onlineRequestPending = false;
+        }
+      }
+
+      function updateOpponentBalls(snapshots) {
+        if (!Array.isArray(snapshots)) return;
+        const existing = new Map(opponentBalls.map(ball => [ball.id, ball]));
+        const now = performance.now();
+        opponentBalls = snapshots.map(snapshot => {
+          const ball = existing.get(snapshot.id) || {
+            id: snapshot.id,
+            isOpponent: true,
+            trail: [],
+            powerReadyAt: 0
+          };
+          Object.assign(ball, {
+            x: snapshot.x,
+            y: snapshot.y,
+            vx: snapshot.vx,
+            vy: snapshot.vy,
+            radius: snapshot.radius,
+            styleId: snapshot.styleId,
+            boostUntil: snapshot.boosted ? now + 250 : 0,
+            isOpponent: true
+          });
+          return ball;
+        });
+      }
+
+      function formatSurvivalTime(seconds) {
+        const safeSeconds = Math.max(0, seconds || 0);
+        const minutes = Math.floor(safeSeconds / 60);
+        const remainingSeconds = Math.floor(safeSeconds % 60);
+        const centiseconds = Math.floor((safeSeconds % 1) * 100);
+        return `${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}.${String(centiseconds).padStart(2, "0")}`;
+      }
+
+      function renderShop(category) {
+        const shop = getShopCategory(category);
+        activeShopCategory = category;
+        shopSort.value = shopSortMode;
+        shopCategoryTitle.textContent = shop.title;
+        shopDescription.textContent = shop.description;
+        shopList.replaceChildren();
+        const alphabetical = (first, second) => first.name.localeCompare(second.name, "ko");
+        const sortedItems = [...shop.items].sort((first, second) => {
+          if (shopSortMode === "owned") {
+            const ownedDifference = Number(shop.ownedIds.includes(second.id)) -
+              Number(shop.ownedIds.includes(first.id));
+            return ownedDifference || alphabetical(first, second);
+          }
+          if (shopSortMode === "price") {
+            return first.price - second.price || alphabetical(first, second);
+          }
+          return alphabetical(first, second);
+        });
+        for (const style of sortedItems) {
+          const owned = shop.ownedIds.includes(style.id);
+          const selected = shop.selectedId === style.id;
+          const card = document.createElement("div");
+          card.className = "shop-card";
+
+          const preview = document.createElement("span");
+          const previewType = category === "paddles" ? `paddle-preview ${style.shape || ""}` :
+            category === "backgrounds" ? `background-preview ${style.motif || ""}` : `ball-preview ${style.shape}`;
+          preview.className = previewType;
+          preview.style.setProperty("--ball-color", style.color || style.middle);
+          if (category === "backgrounds") {
+            preview.style.setProperty("--bg-top", style.top);
+            preview.style.setProperty("--bg-middle", style.middle);
+            preview.style.setProperty("--bg-bottom", style.bottom);
+          }
+          preview.setAttribute("aria-hidden", "true");
+
+          const details = document.createElement("div");
+          const name = document.createElement("strong");
+          name.textContent = style.name;
+          const price = document.createElement("p");
+          price.textContent = style.price === 0 ? "무료" : `${style.price} 포인트`;
+          details.append(name, price);
+          if (category === "balls") {
+            const powerDescription = document.createElement("p");
+            const power = ballPowerFor(style.id);
+            powerDescription.textContent = `특수 능력 · ${power.name}: ${power.description}`;
+            details.append(powerDescription);
+          }
+
+          const action = document.createElement("button");
+          action.type = "button";
+          if (selected) {
+            action.textContent = "장착 중";
+            action.disabled = true;
+          } else if (owned) {
+            action.textContent = "장착";
+            action.addEventListener("click", () => {
+              selectShopItem(category, style.id);
+              persistProgress();
+              updatePointsDisplay();
+              renderShop(category);
+              draw();
+            });
+          } else if (points < style.price) {
+            action.textContent = "포인트 부족";
+            action.disabled = true;
+          } else {
+            action.textContent = "구매";
+            action.addEventListener("click", () => {
+              if (points < style.price) return;
+              changePoints(-style.price);
+              addOwnedShopItem(category, style.id);
+              selectShopItem(category, style.id);
+              persistProgress();
+              updatePointsDisplay();
+              renderShop(category);
+              draw();
+            });
+          }
+
+          card.append(preview, details, action);
+          shopList.append(card);
+        }
+      }
+
+      function showHome() {
+        if (onlineMatch && (running || countdownActive)) syncOnlineMatch(true);
+        if (score > 0) submitBestCatches();
+        running = false;
+        countdownActive = false;
+        isPaused = false;
+        clearContinueCountdown();
+        continueAction.hidden = true;
+        settingsReturnToGame = false;
+        cancelAnimationFrame(animationId);
+        gameView.hidden = true;
+        homeScreen.hidden = false;
+        usageScreen.hidden = true;
+        shopScreen.hidden = true;
+        itemShopScreen.hidden = true;
+        settingsScreen.hidden = true;
+        controls.hidden = true;
+        startButton.disabled = false;
+        updatePointsDisplay();
+        if (onlineUser) loadLeaderboards();
+      }
+
+      function showUsage() {
+        gameView.hidden = true;
+        homeScreen.hidden = true;
+        usageScreen.hidden = false;
+        shopScreen.hidden = true;
+        itemShopScreen.hidden = true;
+        settingsScreen.hidden = true;
+        updatePointsDisplay();
+      }
+
+      function showShopHub() {
+        gameView.hidden = true;
+        homeScreen.hidden = true;
+        usageScreen.hidden = true;
+        shopScreen.hidden = false;
+        itemShopScreen.hidden = true;
+        settingsScreen.hidden = true;
+        controls.hidden = true;
+        updatePointsDisplay();
+      }
+
+      function showShopCategory(category) {
+        gameView.hidden = true;
+        homeScreen.hidden = true;
+        usageScreen.hidden = true;
+        shopScreen.hidden = true;
+        itemShopScreen.hidden = false;
+        settingsScreen.hidden = true;
+        controls.hidden = true;
+        updatePointsDisplay();
+        renderShop(category);
+      }
+
+      function openSettings(fromGame) {
+        settingsReturnToGame = fromGame;
+        if (fromGame && running) pauseGame();
+        gameView.hidden = true;
+        homeScreen.hidden = true;
+        usageScreen.hidden = true;
+        shopScreen.hidden = true;
+        itemShopScreen.hidden = true;
+        settingsScreen.hidden = false;
+        updateSettingsUI();
+        prepareAudio();
+        updateBgm();
+      }
+
+      function closeSettings() {
+        settingsScreen.hidden = true;
+        if (settingsReturnToGame) {
+          settingsReturnToGame = false;
+          gameView.hidden = false;
+          return;
+        }
+        showHome();
+      }
+
+      function reset(preserveScore = false) {
+        const scoreBeforeReset = score;
+        score = preserveScore ? scoreBeforeReset : 0;
+        currentWave = waveForScore(score);
+        const speedMultiplier = waveSpeedMultiplier(currentWave);
+        paddle.x = (width - paddle.width) / 2;
+        paddle.targetX = paddle.x;
+        const initialVelocityY = 4.2 * speedMultiplier;
+        const initialVelocityX = (Math.random() < 0.5 ? -1 : 1) * 3.2 * speedMultiplier;
+        const initialFlightFrames = (paddle.y - BALL_RADIUS - height * 0.22) / initialVelocityY;
+        balls = [{
+          id: newBallId(),
+          styleId: selectedBallId,
+          isOpponent: false,
+          x: Math.max(BALL_RADIUS, Math.min(width - BALL_RADIUS, width / 2 - initialVelocityX * initialFlightFrames)),
+          y: height * 0.22,
+          radius: BALL_RADIUS,
+          vx: initialVelocityX,
+          vy: initialVelocityY,
+          boostUntil: 0,
+          trail: []
+        }];
+        opponentBalls = [];
+        splitHitsRemaining = 0;
+        splitCharge = 0;
+        splitPending = false;
+        mergeHitCharge = 0;
+        splitEffectUntil = 0;
+        nightUntil = 0;
+        flashStarted = 0;
+        flashUntil = 0;
+        lastFlashAt = -Infinity;
+        slowUntil = 0;
+        lastSlowAt = -Infinity;
+        widePaddleUntil = 0;
+        lastWideAt = -Infinity;
+        shieldCharges = 0;
+        doublePointsRemaining = 0;
+        comboPointsRemaining = 0;
+        precisionUntil = 0;
+        status.textContent = `받은 횟수: ${score} · 웨이브 ${currentWave}`;
+      }
+
+      function draw(time = performance.now()) {
+        ctx.clearRect(0, 0, width, height);
+        const backgroundStyle = currentBackgroundStyle();
+        const sky = ctx.createLinearGradient(0, 0, width, height);
+        sky.addColorStop(0, backgroundStyle.top);
+        sky.addColorStop(0.58, backgroundStyle.middle);
+        sky.addColorStop(1, backgroundStyle.bottom);
+        ctx.fillStyle = sky;
+        ctx.fillRect(0, 0, width, height);
+
+        const glow = ctx.createRadialGradient(width * 0.5, height * 0.42, 5, width * 0.5, height * 0.42, 300);
+        glow.addColorStop(0, backgroundStyle.glow);
+        glow.addColorStop(1, backgroundStyle.middle);
+        ctx.globalAlpha = 0.12;
+        ctx.fillStyle = glow;
+        ctx.fillRect(0, 0, width, height);
+        ctx.globalAlpha = 1;
+
+        for (const star of stars) {
+          ctx.globalAlpha = star.alpha;
+          ctx.fillStyle = backgroundStyle.stars;
+          ctx.beginPath();
+          ctx.arc(star.x, star.y, star.radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+
+        ctx.strokeStyle = "#a9ceff12";
+        ctx.lineWidth = 1;
+        for (let y = 52; y < height; y += 44) {
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(width, y);
+          ctx.stroke();
+        }
+        if (backgroundStyle.motif === "clock") {
+          ctx.save();
+          ctx.translate(width / 2, height * 0.51);
+          ctx.strokeStyle = "#ffe7a01c";
+          ctx.lineWidth = 1;
+          for (const radius of [72, 142, 214]) {
+            ctx.beginPath();
+            ctx.arc(0, 0, radius, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+          for (let tick = 0; tick < 48; tick += 1) {
+            const angle = tick * Math.PI / 24;
+            const innerRadius = tick % 4 === 0 ? 190 : 198;
+            ctx.beginPath();
+            ctx.moveTo(Math.cos(angle) * innerRadius, Math.sin(angle) * innerRadius);
+            ctx.lineTo(Math.cos(angle) * 210, Math.sin(angle) * 210);
+            ctx.stroke();
+          }
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(0, -48);
+          ctx.moveTo(0, 0);
+          ctx.lineTo(40, 18);
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        ctx.fillStyle = "#c8d8ec";
+        ctx.font = "600 15px system-ui, sans-serif";
+        ctx.fillText(`받은 횟수 ${score}`, 16, 27);
+        ctx.fillStyle = "#ffd166";
+        ctx.fillText(`웨이브 ${currentWave}`, width - 122, 27);
+        ctx.fillStyle = "#ffd166";
+        ctx.fillText(`포인트 ${points}`, 16, 48);
+        if (splitHitsRemaining > 0) {
+          ctx.fillStyle = "#d7a8ff";
+          ctx.fillText(`합체까지 ${splitHitsRemaining} (${mergeHitCharge}/2)`, 158, 27);
+        } else if (splitPending) {
+          ctx.fillStyle = "#ffe99a";
+          ctx.fillText("분열까지 1회", 158, 27);
+        } else if (splitCharge > 0) {
+          ctx.fillStyle = "#d7a8ff";
+          ctx.fillText("분열 확률 확인 중", 158, 27);
+        }
+        if ([...balls, ...opponentBalls].some(ball => ball.boostUntil > time)) {
+          ctx.fillStyle = "#ffd166";
+          ctx.fillText("BOOST", width - 80, 48);
+        }
+        if (time < slowUntil) {
+          ctx.fillStyle = "#8df5ff";
+          ctx.fillText("SLOW", width - 80, 68);
+        }
+        if (time < widePaddleUntil) {
+          ctx.fillStyle = "#9effa8";
+          ctx.fillText("WIDE", width - 80, 88);
+        }
+        if (shieldCharges > 0) {
+          ctx.fillStyle = "#7deaff";
+          ctx.fillText(`보호막 ${shieldCharges}`, 16, 68);
+          ctx.strokeStyle = "#7deaffaa";
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(0, height - 5);
+          ctx.lineTo(width, height - 5);
+          ctx.stroke();
+        }
+        if (doublePointsRemaining > 0) {
+          ctx.fillStyle = "#ffd166";
+          ctx.fillText(`포인트 2배 ×${doublePointsRemaining}`, 16, 88);
+        }
+        if (comboPointsRemaining > 0) {
+          ctx.fillStyle = "#f7a8ff";
+          ctx.fillText(`콤보 +100 ×${comboPointsRemaining}`, 16, 108);
+        }
+        if (time < precisionUntil) {
+          ctx.fillStyle = "#b8ff9e";
+          ctx.fillText("정밀 조준", width - 100, 108);
+        }
+
+        for (const ball of [...balls, ...opponentBalls]) {
+          if (time < splitEffectUntil) {
+            const progress = 1 - (splitEffectUntil - time) / 900;
+            ctx.save();
+            ctx.globalAlpha = 1 - progress;
+            ctx.strokeStyle = "#ffe99a";
+            ctx.shadowColor = "#ffd166";
+            ctx.shadowBlur = 16;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius + 5 + progress * 5, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+          }
+          ball.trail = ball.trail.filter(point => time - point.time < 520);
+          for (const point of ball.trail) {
+            const alpha = 1 - (time - point.time) / 520;
+            ctx.globalAlpha = alpha * 0.55;
+            ctx.fillStyle = "#ffb84d";
+            ctx.beginPath();
+            ctx.arc(point.x, point.y, ball.radius * alpha, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.globalAlpha = 1;
+          ctx.save();
+          ctx.shadowColor = ball.boostUntil > time ? "#ff9d32" : "#71c7ff";
+          ctx.shadowBlur = ball.boostUntil > time ? 24 : 14;
+          const style = ballStyleFor(ball.styleId);
+          const ballGradient = ctx.createRadialGradient(
+            ball.x - 3, ball.y - 4, 1, ball.x, ball.y, ball.radius
+          );
+          ballGradient.addColorStop(0, "#ffffff");
+          ballGradient.addColorStop(0.35, ball.boostUntil > time ? "#ffe39b" : "#e5f4ff");
+          ballGradient.addColorStop(1, ball.boostUntil > time ? "#ff8b38" : style.color);
+          ctx.fillStyle = ballGradient;
+          if (style.shape === "diamond") {
+            ctx.save();
+            ctx.translate(ball.x, ball.y);
+            ctx.rotate(Math.PI / 4);
+            ctx.beginPath();
+            ctx.roundRect(-ball.radius * 0.72, -ball.radius * 0.72, ball.radius * 1.44, ball.radius * 1.44, 3);
+            ctx.fill();
+            ctx.restore();
+          } else if (style.shape === "star") {
+            ctx.beginPath();
+            for (let point = 0; point < 10; point += 1) {
+              const radius = point % 2 === 0 ? ball.radius : ball.radius * 0.46;
+              const angle = -Math.PI / 2 + point * Math.PI / 5;
+              const x = ball.x + Math.cos(angle) * radius;
+              const y = ball.y + Math.sin(angle) * radius;
+              if (point === 0) ctx.moveTo(x, y);
+              else ctx.lineTo(x, y);
+            }
+            ctx.closePath();
+            ctx.fill();
+          } else if (style.shape === "ring") {
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius * 0.72, 0, Math.PI * 2);
+            ctx.lineWidth = ball.radius * 0.42;
+            ctx.strokeStyle = ballGradient;
+            ctx.stroke();
+          } else if (style.shape === "rainbow") {
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+            ctx.clip();
+            const rainbow = ctx.createLinearGradient(
+              ball.x - ball.radius, ball.y - ball.radius,
+              ball.x + ball.radius, ball.y + ball.radius
+            );
+            rainbow.addColorStop(0, "#ff315d");
+            rainbow.addColorStop(0.2, "#ffb52e");
+            rainbow.addColorStop(0.4, "#ffe65b");
+            rainbow.addColorStop(0.6, "#55e679");
+            rainbow.addColorStop(0.8, "#3ac7ff");
+            rainbow.addColorStop(1, "#bd63ff");
+            ctx.fillStyle = rainbow;
+            ctx.fillRect(ball.x - ball.radius, ball.y - ball.radius, ball.radius * 2, ball.radius * 2);
+            ctx.restore();
+          } else if (style.shape === "blackhole") {
+            const disk = ctx.createLinearGradient(ball.x - ball.radius, ball.y, ball.x + ball.radius, ball.y);
+            disk.addColorStop(0, "#693bff");
+            disk.addColorStop(0.5, "#ff9d4d");
+            disk.addColorStop(1, "#8b44ff");
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius * 0.8, 0, Math.PI * 2);
+            ctx.lineWidth = ball.radius * 0.35;
+            ctx.strokeStyle = disk;
+            ctx.stroke();
+            const voidGradient = ctx.createRadialGradient(ball.x, ball.y, 0, ball.x, ball.y, ball.radius * 0.72);
+            voidGradient.addColorStop(0, "#020207");
+            voidGradient.addColorStop(0.72, "#080611");
+            voidGradient.addColorStop(1, "#29163f");
+            ctx.fillStyle = voidGradient;
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius * 0.68, 0, Math.PI * 2);
+            ctx.fill();
+          } else if (style.shape === "galaxy") {
+            const galaxy = ctx.createRadialGradient(ball.x - 3, ball.y - 3, 0, ball.x, ball.y, ball.radius);
+            galaxy.addColorStop(0, "#ffe0ff");
+            galaxy.addColorStop(0.32, "#c05cff");
+            galaxy.addColorStop(0.7, "#5435bb");
+            galaxy.addColorStop(1, "#152b68");
+            ctx.fillStyle = galaxy;
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = "#fff";
+            ctx.fillRect(ball.x - 4, ball.y - 2, 1.5, 1.5);
+            ctx.fillRect(ball.x + 3, ball.y + 3, 1, 1);
+          } else if (style.shape === "comet") {
+            ctx.save();
+            ctx.translate(ball.x, ball.y);
+            ctx.rotate(Math.atan2(ball.vy, ball.vx));
+            const tail = ctx.createLinearGradient(-ball.radius * 4, 0, ball.radius, 0);
+            tail.addColorStop(0, "#74e6ff00");
+            tail.addColorStop(1, "#b8f5ffcc");
+            ctx.fillStyle = tail;
+            ctx.beginPath();
+            ctx.moveTo(-ball.radius * 4, -ball.radius * 0.35);
+            ctx.lineTo(ball.radius * 0.3, -ball.radius * 0.7);
+            ctx.lineTo(ball.radius * 0.3, ball.radius * 0.7);
+            ctx.lineTo(-ball.radius * 4, ball.radius * 0.35);
+            ctx.closePath();
+            ctx.fill();
+            ctx.fillStyle = ballGradient;
+            ctx.beginPath();
+            ctx.arc(0, 0, ball.radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          } else if (style.shape === "sun") {
+            ctx.strokeStyle = "#ffca62";
+            ctx.lineWidth = 2;
+            for (let ray = 0; ray < 8; ray += 1) {
+              const angle = ray * Math.PI / 4;
+              ctx.beginPath();
+              ctx.moveTo(ball.x + Math.cos(angle) * ball.radius * 0.85, ball.y + Math.sin(angle) * ball.radius * 0.85);
+              ctx.lineTo(ball.x + Math.cos(angle) * ball.radius * 1.3, ball.y + Math.sin(angle) * ball.radius * 1.3);
+              ctx.stroke();
+            }
+            ctx.fillStyle = ballGradient;
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius * 0.82, 0, Math.PI * 2);
+            ctx.fill();
+          } else if (style.shape === "crystal" || style.shape === "ice") {
+            const sides = style.shape === "ice" ? 6 : 5;
+            ctx.beginPath();
+            for (let point = 0; point < sides; point += 1) {
+              const angle = -Math.PI / 2 + point * Math.PI * 2 / sides;
+              const x = ball.x + Math.cos(angle) * ball.radius;
+              const y = ball.y + Math.sin(angle) * ball.radius;
+              if (point === 0) ctx.moveTo(x, y);
+              else ctx.lineTo(x, y);
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = "#ffffff99";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(ball.x, ball.y);
+            ctx.lineTo(ball.x, ball.y - ball.radius);
+            ctx.lineTo(ball.x + ball.radius * 0.8, ball.y + ball.radius * 0.2);
+            ctx.stroke();
+          } else if (style.shape === "neon") {
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius * 0.72, 0, Math.PI * 2);
+            ctx.lineWidth = ball.radius * 0.28;
+            ctx.strokeStyle = ballGradient;
+            ctx.stroke();
+            ctx.fillStyle = "#eaffff";
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius * 0.18, 0, Math.PI * 2);
+            ctx.fill();
+          } else if (style.shape === "lightning") {
+            ctx.beginPath();
+            ctx.moveTo(ball.x + ball.radius * 0.15, ball.y - ball.radius);
+            ctx.lineTo(ball.x - ball.radius * 0.75, ball.y + ball.radius * 0.05);
+            ctx.lineTo(ball.x - ball.radius * 0.08, ball.y + ball.radius * 0.05);
+            ctx.lineTo(ball.x - ball.radius * 0.35, ball.y + ball.radius);
+            ctx.lineTo(ball.x + ball.radius * 0.75, ball.y - ball.radius * 0.15);
+            ctx.lineTo(ball.x + ball.radius * 0.1, ball.y - ball.radius * 0.15);
+            ctx.closePath();
+            ctx.fill();
+          } else if (style.shape === "clock") {
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius * 0.9, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = "#fff4c2";
+            ctx.lineWidth = Math.max(1, ball.radius * 0.12);
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius * 0.68, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(ball.x, ball.y);
+            ctx.lineTo(ball.x, ball.y - ball.radius * 0.46);
+            ctx.moveTo(ball.x, ball.y);
+            ctx.lineTo(ball.x + ball.radius * 0.38, ball.y + ball.radius * 0.2);
+            ctx.stroke();
+          } else if (style.shape === "heart") {
+            ctx.beginPath();
+            ctx.moveTo(ball.x, ball.y + ball.radius * 0.9);
+            ctx.bezierCurveTo(ball.x - ball.radius * 1.35, ball.y + ball.radius * 0.1, ball.x - ball.radius * 0.8, ball.y - ball.radius * 0.9, ball.x, ball.y - ball.radius * 0.25);
+            ctx.bezierCurveTo(ball.x + ball.radius * 0.8, ball.y - ball.radius * 0.9, ball.x + ball.radius * 1.35, ball.y + ball.radius * 0.1, ball.x, ball.y + ball.radius * 0.9);
+            ctx.fill();
+          } else if (style.shape === "moon") {
+            ctx.beginPath();
+            ctx.moveTo(ball.x + ball.radius * 0.65, ball.y - ball.radius * 0.82);
+            ctx.quadraticCurveTo(ball.x - ball.radius * 1.2, ball.y - ball.radius * 0.7, ball.x - ball.radius * 0.75, ball.y + ball.radius * 0.22);
+            ctx.quadraticCurveTo(ball.x - ball.radius * 0.35, ball.y + ball.radius * 1.02, ball.x + ball.radius * 0.65, ball.y + ball.radius * 0.72);
+            ctx.quadraticCurveTo(ball.x - ball.radius * 0.2, ball.y + ball.radius * 0.05, ball.x + ball.radius * 0.65, ball.y - ball.radius * 0.82);
+            ctx.fill();
+          } else if (style.shape === "planet") {
+            ctx.save();
+            ctx.translate(ball.x, ball.y);
+            ctx.rotate(-0.3);
+            ctx.strokeStyle = style.color;
+            ctx.lineWidth = ball.radius * 0.24;
+            ctx.beginPath();
+            ctx.ellipse(0, 0, ball.radius * 1.35, ball.radius * 0.48, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.fillStyle = ballGradient;
+            ctx.beginPath();
+            ctx.arc(0, 0, ball.radius * 0.76, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = "#ffffffbb";
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            ctx.restore();
+          } else if (style.shape === "hex") {
+            ctx.beginPath();
+            for (let point = 0; point < 6; point += 1) {
+              const angle = -Math.PI / 2 + point * Math.PI / 3;
+              const x = ball.x + Math.cos(angle) * ball.radius;
+              const y = ball.y + Math.sin(angle) * ball.radius;
+              if (point === 0) ctx.moveTo(x, y);
+              else ctx.lineTo(x, y);
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = "#ffffffcc";
+            ctx.lineWidth = 1.2;
+            ctx.stroke();
+          } else if (style.shape === "flower") {
+            for (let petal = 0; petal < 6; petal += 1) {
+              const angle = petal * Math.PI / 3;
+              ctx.beginPath();
+              ctx.arc(
+                ball.x + Math.cos(angle) * ball.radius * 0.48,
+                ball.y + Math.sin(angle) * ball.radius * 0.48,
+                ball.radius * 0.38,
+                0,
+                Math.PI * 2
+              );
+              ctx.fill();
+            }
+            ctx.fillStyle = "#fff2a8";
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius * 0.28, 0, Math.PI * 2);
+            ctx.fill();
+          } else if (style.shape === "flame") {
+            ctx.beginPath();
+            ctx.moveTo(ball.x, ball.y - ball.radius);
+            ctx.quadraticCurveTo(ball.x + ball.radius * 0.25, ball.y - ball.radius * 0.25, ball.x + ball.radius * 0.82, ball.y + ball.radius * 0.08);
+            ctx.quadraticCurveTo(ball.x + ball.radius * 0.78, ball.y + ball.radius, ball.x, ball.y + ball.radius);
+            ctx.quadraticCurveTo(ball.x - ball.radius * 1.05, ball.y + ball.radius * 0.6, ball.x - ball.radius * 0.55, ball.y - ball.radius * 0.05);
+            ctx.quadraticCurveTo(ball.x - ball.radius * 0.3, ball.y + ball.radius * 0.15, ball.x, ball.y - ball.radius);
+            ctx.fill();
+            ctx.fillStyle = "#fff0a8";
+            ctx.beginPath();
+            ctx.ellipse(ball.x, ball.y + ball.radius * 0.38, ball.radius * 0.24, ball.radius * 0.4, 0, 0, Math.PI * 2);
+            ctx.fill();
+          } else if (style.shape === "gear") {
+            ctx.beginPath();
+            for (let point = 0; point < 16; point += 1) {
+              const angle = -Math.PI / 2 + point * Math.PI / 8;
+              const radius = point % 2 === 0 ? ball.radius : ball.radius * 0.72;
+              const x = ball.x + Math.cos(angle) * radius;
+              const y = ball.y + Math.sin(angle) * radius;
+              if (point === 0) ctx.moveTo(x, y);
+              else ctx.lineTo(x, y);
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.fillStyle = "#19263c";
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius * 0.32, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = "#fff1bd";
+            ctx.lineWidth = 1;
+            ctx.stroke();
+          } else if (style.shape === "pixel") {
+            const pixels = [
+              [-1, -1], [0, -1], [1, -1],
+              [-1, 0], [0, 0], [1, 0],
+              [-1, 1], [0, 1], [1, 1]
+            ];
+            const size = ball.radius * 0.52;
+            for (const [column, row] of pixels) {
+              if ((column + row) % 2 === 0) continue;
+              ctx.fillRect(ball.x + column * size - size / 2, ball.y + row * size - size / 2, size, size);
+            }
+            ctx.fillRect(ball.x - size / 2, ball.y - size / 2, size, size);
+          } else if (style.shape === "prism") {
+            ctx.beginPath();
+            ctx.moveTo(ball.x, ball.y - ball.radius);
+            ctx.lineTo(ball.x + ball.radius * 0.88, ball.y + ball.radius * 0.62);
+            ctx.lineTo(ball.x, ball.y + ball.radius);
+            ctx.lineTo(ball.x - ball.radius * 0.88, ball.y + ball.radius * 0.62);
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = "#ffffffcc";
+            ctx.lineWidth = 1.2;
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(ball.x, ball.y - ball.radius * 0.72);
+            ctx.lineTo(ball.x, ball.y + ball.radius * 0.72);
+            ctx.stroke();
+          } else if (style.shape === "vortex") {
+            ctx.strokeStyle = "#e3eaff";
+            ctx.lineWidth = 1.8;
+            ctx.beginPath();
+            for (let step = 0; step <= 36; step += 1) {
+              const progress = step / 36;
+              const angle = progress * Math.PI * 3.2;
+              const radius = ball.radius * 0.08 + progress * ball.radius * 0.72;
+              const x = ball.x + Math.cos(angle) * radius;
+              const y = ball.y + Math.sin(angle) * radius;
+              if (step === 0) ctx.moveTo(x, y);
+              else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+          } else {
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.restore();
+          if (ball.isOpponent) {
+            ctx.save();
+            ctx.strokeStyle = "#ff91cf";
+            ctx.lineWidth = 2;
+            ctx.setLineDash([3, 3]);
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius + 3, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+          }
+        }
+
+        ctx.save();
+        const paddleStyle = currentPaddleStyle();
+        const paddleWidth = effectivePaddleWidth(time);
+        ctx.shadowColor = paddleStyle.color;
+        ctx.shadowBlur = 20;
+        const paddleGradient = ctx.createLinearGradient(paddle.x, paddle.y, paddle.x, paddle.y + paddle.height);
+        paddleGradient.addColorStop(0, paddleStyle.light);
+        paddleGradient.addColorStop(0.35, paddleStyle.color);
+        paddleGradient.addColorStop(1, paddleStyle.dark);
+        ctx.fillStyle = paddleGradient;
+        ctx.beginPath();
+        ctx.roundRect(paddle.x, paddle.y, paddleWidth, paddle.height, 7);
+        ctx.fill();
+        ctx.restore();
+        if (paddleStyle.shape === "clock") {
+          const centerX = paddle.x + paddleWidth / 2;
+          const centerY = paddle.y + paddle.height / 2;
+          ctx.strokeStyle = "#fff1b1dd";
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, paddle.height * 0.32, 0, Math.PI * 2);
+          ctx.moveTo(centerX, centerY);
+          ctx.lineTo(centerX, centerY - paddle.height * 0.22);
+          ctx.moveTo(centerX, centerY);
+          ctx.lineTo(centerX + paddle.height * 0.2, centerY + paddle.height * 0.08);
+          ctx.stroke();
+        }
+
+        if (time < nightUntil) {
+          const light = ctx.createRadialGradient(
+            paddle.x + paddleWidth / 2, paddle.y + paddle.height / 2, 24,
+            paddle.x + paddleWidth / 2, paddle.y + paddle.height / 2, 175
+          );
+          light.addColorStop(0, "#05091400");
+          light.addColorStop(0.48, "#05091455");
+          light.addColorStop(1, "#050914f2");
+          ctx.fillStyle = light;
+          ctx.fillRect(0, 0, width, height);
+        }
+        if (time < flashUntil) {
+          const opacity = 0.24 * (1 - (time - flashStarted) / FLASH_DURATION);
+          ctx.fillStyle = `rgba(238, 246, 255, ${opacity})`;
+          ctx.fillRect(0, 0, width, height);
+        }
+      }
+
+      function finish() {
+        running = false;
+        countdownActive = false;
+        isPaused = false;
+        submitBestCatches();
+        if (onlineMatch) syncOnlineMatch(true);
+        keys.left = false;
+        keys.right = false;
+        gameView.hidden = false;
+        gameToolbar.hidden = false;
+        pauseButton.disabled = true;
+        setPauseButtonMode("pause");
+        gameAgainButton.hidden = Boolean(onlineMatch);
+        controls.hidden = true;
+        title.textContent = "게임 종료";
+        message.textContent = onlineMatch
+          ? `${onlineMatch.opponent}와 대전 중이에요. 상대 플레이가 끝날 때까지 결과를 기다립니다.`
+          : `웨이브 ${currentWave}에서 공을 ${score}번 받았어요. 500 포인트로 10초 안에 이어갈 수 있습니다.`;
+        gameAgainButton.textContent = "▶ 다시 시작";
+        gameAgainButton.hidden = Boolean(onlineMatch);
+        gameAgainButton.disabled = false;
+        continueAction.hidden = Boolean(onlineMatch);
+        homeButton.hidden = false;
+        overlay.hidden = false;
+        if (onlineMatch) {
+          clearContinueCountdown();
+          continueAction.hidden = true;
+        } else {
+          startContinueCountdown();
+        }
+      }
+
+      function pauseGame() {
+        if (!running) return;
+        running = false;
+        isPaused = true;
+        cancelAnimationFrame(animationId);
+        setPauseButtonMode("resume");
+        continueAction.hidden = true;
+        gameAgainButton.hidden = true;
+        homeButton.hidden = false;
+        title.textContent = "일시 정지";
+        message.textContent = "위쪽 재생 버튼을 누르면 게임이 이어집니다.";
+        overlay.hidden = false;
+        controls.hidden = true;
+      }
+
+      function resumeGame() {
+        if (!isPaused) return;
+        isPaused = false;
+        running = true;
+        lastTime = 0;
+        setPauseButtonMode("pause");
+        overlay.hidden = true;
+        controls.hidden = false;
+        animationId = requestAnimationFrame(frame);
+      }
+
+      function setPauseButtonMode(mode) {
+        const resumeMode = mode === "resume";
+        pauseButton.classList.toggle("is-resume", resumeMode);
+        pauseButton.setAttribute("aria-label", resumeMode ? "재생" : "일시 정지");
+        pauseButton.title = resumeMode ? "재생" : "일시 정지";
+      }
+
+      function togglePause() {
+        if (running) pauseGame();
+        else if (isPaused) resumeGame();
+      }
+
+      function clearContinueCountdown() {
+        if (continueCountdownTimer) {
+          window.clearInterval(continueCountdownTimer);
+          continueCountdownTimer = 0;
+        }
+        continueUntil = 0;
+      }
+
+      function updateContinueCountdown() {
+        const remaining = Math.max(0, continueUntil - performance.now());
+        const seconds = Math.ceil(remaining / 1000);
+        continueSeconds.textContent = `${seconds}초`;
+        continueCountdown.setAttribute("aria-label", `${seconds}초 남음`);
+        continueProgress.style.strokeDashoffset =
+          String(TIMER_CIRCUMFERENCE * (1 - remaining / CONTINUE_WINDOW));
+        if (remaining === 0) {
+          clearContinueCountdown();
+          continueAction.hidden = true;
+          message.textContent = "이어하기 시간이 끝났어요. 다시 시작해 보세요.";
+        }
+      }
+
+      function startContinueCountdown() {
+        clearContinueCountdown();
+        continueUntil = performance.now() + CONTINUE_WINDOW;
+        continueAction.hidden = false;
+        continueGameButton.hidden = false;
+        updateContinueCountdown();
+        continueCountdownTimer = window.setInterval(updateContinueCountdown, 100);
+      }
+
+      function continueGame() {
+        if (!continueUntil || performance.now() >= continueUntil) return;
+        if (points < 500) {
+          continueGameButton.disabled = true;
+          status.textContent = "이어가려면 500 포인트가 필요합니다.";
+          return;
+        }
+        clearContinueCountdown();
+        continueAction.hidden = true;
+        changePoints(-500);
+        start(true);
+      }
+
+      function resolveBallCollisions(activeBalls) {
+        for (let first = 0; first < activeBalls.length; first += 1) {
+          for (let second = first + 1; second < activeBalls.length; second += 1) {
+            const ballA = activeBalls[first];
+            const ballB = activeBalls[second];
+            const dx = ballB.x - ballA.x;
+            const dy = ballB.y - ballA.y;
+            const minimumDistance = ballA.radius + ballB.radius;
+            const distance = Math.hypot(dx, dy);
+            if (distance === 0 || distance >= minimumDistance) continue;
+
+            const angle = Math.random() * Math.PI * 2;
+            const normalX = Math.cos(angle);
+            const normalY = Math.sin(angle);
+            const overlap = (minimumDistance - distance) / 2 + 0.1;
+            ballA.x -= normalX * overlap;
+            ballA.y -= normalY * overlap;
+            ballB.x += normalX * overlap;
+            ballB.y += normalY * overlap;
+
+            const speedA = Math.max(2, Math.hypot(ballA.vx, ballA.vy));
+            const speedB = Math.max(2, Math.hypot(ballB.vx, ballB.vy));
+            ballA.vx = normalX * speedA;
+            ballA.vy = normalY * speedA;
+            ballB.vx = -normalX * speedB;
+            ballB.vy = -normalY * speedB;
+          }
+        }
+      }
+
+      function update(delta) {
+        const time = performance.now();
+        const frameScale = Math.min(delta / 16.67, 2);
+        if (pointerActive) {
+          const dragDelta = paddle.targetX - paddle.x;
+          const maxDragStep = 7 * frameScale;
+          paddle.x += Math.max(-maxDragStep, Math.min(maxDragStep, dragDelta));
+        } else {
+          const direction = Number(keys.right) - Number(keys.left);
+          paddle.x += direction * paddle.speed * frameScale;
+        }
+        const paddleWidth = effectivePaddleWidth(time);
+        paddle.x = Math.max(0, Math.min(width - paddleWidth, paddle.x));
+
+        const ballFrameScale = time < slowUntil ? frameScale * 0.65 : frameScale;
+        const newBalls = [];
+        const activeBalls = [...balls, ...opponentBalls];
+        for (const ball of activeBalls) {
+          if (ball.boostUntil && time >= ball.boostUntil) {
+            ball.vx /= BOOST_MULTIPLIER;
+            ball.vy /= BOOST_MULTIPLIER;
+            ball.boostUntil = 0;
+            ball.trail = [];
+          }
+          if (ball.boostUntil) ball.trail.push({ x: ball.x, y: ball.y, time });
+
+          const previousBottom = ball.y + ball.radius;
+          ball.x += ball.vx * ballFrameScale;
+          ball.y += ball.vy * ballFrameScale;
+
+          if (ball.x - ball.radius <= 0) {
+            ball.x = ball.radius;
+            ball.vx = Math.abs(ball.vx);
+          } else if (ball.x + ball.radius >= width) {
+            ball.x = width - ball.radius;
+            ball.vx = -Math.abs(ball.vx);
+          }
+
+          if (ball.y - ball.radius <= 0) {
+            ball.y = ball.radius;
+            ball.vy = Math.abs(ball.vy);
+          }
+
+          const ballBottom = ball.y + ball.radius;
+          const overlapsPaddle =
+            ball.x + ball.radius >= paddle.x &&
+            ball.x - ball.radius <= paddle.x + paddleWidth;
+          if (ball.vy > 0 && previousBottom <= paddle.y &&
+              ballBottom >= paddle.y && overlapsPaddle) {
+            ball.y = paddle.y - ball.radius;
+            const notices = [];
+            const factor = ball.boostUntil ? BOOST_MULTIPLIER : 1;
+            ball.vy = -Math.min(Math.abs(ball.vy) + 0.08 * factor, 6 * factor);
+            const hitOffset = (ball.x - (paddle.x + paddleWidth / 2)) / (paddleWidth / 2);
+            const precisionMultiplier = time < precisionUntil ? 1.8 : 1;
+            ball.vx = Math.max(
+              -5 * factor,
+              Math.min(5 * factor, ball.vx + hitOffset * 1.3 * precisionMultiplier * factor)
+            );
+            score += 1;
+            const reachedWave = waveForScore(score);
+            if (reachedWave > currentWave) {
+              const speedRatio = waveSpeedMultiplier(reachedWave) / waveSpeedMultiplier(currentWave);
+              for (const activeBall of activeBalls) {
+                activeBall.vx *= speedRatio;
+                activeBall.vy *= speedRatio;
+              }
+              currentWave = reachedWave;
+              notices.push(`웨이브 ${currentWave}`);
+            }
+            if (Math.random() < effectChance(RANDOM_BOUNCE_CHANCE)) {
+              const speed = Math.hypot(ball.vx, ball.vy);
+              const currentAngle = Math.atan2(ball.vx, -ball.vy);
+              const angleOffset = (Math.random() * 2 - 1) * Math.PI / 12;
+              const bounceAngle = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, currentAngle + angleOffset));
+              ball.vx = Math.sin(bounceAngle) * speed;
+              ball.vy = -Math.cos(bounceAngle) * speed;
+              notices.push("튕김 각도 변화");
+            }
+
+            if (splitHitsRemaining > 0) {
+              mergeHitCharge += 1;
+              if (mergeHitCharge >= 2) {
+                mergeHitCharge = 0;
+                splitHitsRemaining -= 1;
+              }
+            } else if (splitPending) {
+              splitPending = false;
+              splitHitsRemaining = 3;
+              mergeHitCharge = 0;
+              splitEffectUntil = time + 900;
+              const splitDirection = ball.vx >= 0 ? 1 : -1;
+              const splitSpeed = Math.max(1.8, Math.min(4.5, Math.abs(ball.vx) * 0.8));
+              const splitSide = ball.x < width / 2 ? 1 : -1;
+              const splitX = Math.max(
+                BALL_RADIUS,
+                Math.min(width - BALL_RADIUS, ball.x + splitSide * ball.radius * 2.25)
+              );
+              ball.vx = splitDirection * splitSpeed;
+              newBalls.push({
+                ...ball,
+                id: newBallId(),
+                x: splitX,
+                y: Math.max(BALL_RADIUS, ball.y - ball.radius * 0.3),
+                vx: -splitDirection * splitSpeed,
+                vy: ball.vy * 0.8,
+                trail: []
+              });
+              notices.push("공 분열 성공");
+            } else if (balls.length === 1) {
+              splitCharge += 1;
+              if (splitCharge >= 2) {
+                splitCharge = 0;
+                if (Math.random() < effectChance(SPLIT_CHANCE)) {
+                  splitPending = true;
+                  notices.push("분열 준비");
+                } else {
+                  notices.push("이번엔 분열하지 않음");
+                }
+              }
+            }
+
+            if (Math.random() < effectChance(NIGHT_CHANCE)) nightUntil = time + NIGHT_DURATION;
+            if (time >= widePaddleUntil && time - lastWideAt >= BUFF_COOLDOWN &&
+                Math.random() < effectChance(WAVE_BUFF_CHANCE)) {
+              widePaddleUntil = time + WIDE_PADDLE_DURATION;
+              lastWideAt = time;
+              notices.push("패들 확장");
+            }
+            if (time - lastFlashAt >= 4000 && Math.random() < effectChance(0.08)) {
+              flashStarted = time;
+              flashUntil = time + FLASH_DURATION;
+              lastFlashAt = time;
+              notices.push("섬광");
+              playFlashTone();
+            }
+            const slowTriggered = time >= slowUntil &&
+              time - lastSlowAt >= BUFF_COOLDOWN &&
+              Math.random() < effectChance(WAVE_BUFF_CHANCE);
+            if (slowTriggered) {
+              lastSlowAt = time;
+              const effectBalls = [...balls, ...opponentBalls, ...newBalls];
+              const boostedBalls = effectBalls.filter(activeBall => activeBall.boostUntil > time);
+              if (boostedBalls.length > 0) {
+                for (const boostedBall of boostedBalls) {
+                  boostedBall.vx /= BOOST_MULTIPLIER;
+                  boostedBall.vy /= BOOST_MULTIPLIER;
+                  boostedBall.boostUntil = 0;
+                  boostedBall.trail = [];
+                }
+                notices.push("부스트 해제");
+              } else {
+                slowUntil = time + SLOW_DURATION;
+                notices.push("시간 왜곡");
+              }
+            }
+            const effectBalls = [...balls, ...opponentBalls, ...newBalls];
+            if (!slowTriggered && !effectBalls.some(activeBall => activeBall.boostUntil > time) &&
+                Math.random() < effectChance(BOOST_CHANCE)) {
+              for (const activeBall of effectBalls) {
+                activeBall.vx *= BOOST_MULTIPLIER;
+                activeBall.vy *= BOOST_MULTIPLIER;
+                activeBall.boostUntil = time + BOOST_DURATION;
+                activeBall.trail = [];
+              }
+              notices.push("전체 부스트");
+            }
+            const ballPowerBonus = applyBallPower(
+              ball,
+              time,
+              notices,
+              newBalls,
+              [...balls, ...opponentBalls, ...newBalls]
+            );
+            let specialBonusPoints = 0;
+            let activateDoublePoints = false;
+            let activateComboPoints = false;
+            if (Math.random() < effectChance(SPECIAL_EFFECT_CHANCE)) {
+              const availableEffects = ["coin"];
+              if (shieldCharges === 0) availableEffects.push("shield");
+              if (doublePointsRemaining === 0) availableEffects.push("double");
+              if (comboPointsRemaining === 0) availableEffects.push("combo");
+              if (time >= precisionUntil) availableEffects.push("precision");
+              const chosenEffect = availableEffects[
+                Math.floor(Math.random() * availableEffects.length)
+              ];
+              if (chosenEffect === "shield") {
+                shieldCharges = 1;
+                notices.push("보호막 획득");
+              } else if (chosenEffect === "double") {
+                activateDoublePoints = true;
+                notices.push("황금 기회: 다음 3회 포인트 2배");
+              } else if (chosenEffect === "combo") {
+                activateComboPoints = true;
+                notices.push("콤보 포인트: 다음 5회 +100");
+              } else if (chosenEffect === "precision") {
+                precisionUntil = time + PRECISION_DURATION;
+                notices.push("정밀 조준");
+              } else {
+                specialBonusPoints = 300;
+                notices.push("코인 보너스 +300");
+              }
+            }
+            const doublePointsActive = doublePointsRemaining > 0;
+            const comboPointsActive = comboPointsRemaining > 0;
+            if (doublePointsActive) doublePointsRemaining -= 1;
+            if (comboPointsActive) comboPointsRemaining -= 1;
+            let earnedPoints = 100;
+            if (comboPointsActive) earnedPoints += 100;
+            earnedPoints += ballPowerBonus;
+            earnedPoints += specialBonusPoints;
+            if (Math.random() < effectChance(0.08)) {
+              earnedPoints += 500;
+              notices.push("보너스 +500");
+            }
+            if (doublePointsActive) earnedPoints *= 2;
+            changePoints(earnedPoints);
+            if (activateDoublePoints) doublePointsRemaining = 3;
+            if (activateComboPoints) comboPointsRemaining = 5;
+            status.textContent = persistenceWarning ||
+              `받은 횟수 ${score} · 포인트 +${earnedPoints}${onlineMatch ? ` · 대전 ${onlineMatch.opponent} ${onlineMatch.opponentScore}회` : ""}${notices.length ? ` · ${notices.join(", ")}` : ""}${splitHitsRemaining ? ` · 합체까지 ${splitHitsRemaining}회 (${mergeHitCharge}/2)` : splitPending ? " · 다음 반환 시 분열" : splitCharge ? " · 분열 확률 확인 중" : ""}`;
+          }
+
+          if (ball.y - ball.radius > height) {
+            if (shieldCharges > 0) {
+              shieldCharges -= 1;
+              ball.y = height - ball.radius;
+              ball.vy = -Math.abs(ball.vy);
+              status.textContent = "보호막이 공을 구했습니다.";
+            } else {
+              finish();
+              return;
+            }
+          }
+        }
+
+        for (const newBall of newBalls) {
+          if (newBall.isOpponent) opponentBalls.push(newBall);
+          else balls.push(newBall);
+        }
+        resolveBallCollisions([...balls, ...opponentBalls]);
+        if (splitHitsRemaining === 0 && balls.length > 1) {
+          mergeHitCharge = 0;
+          balls = [balls[0]];
+          balls[0].trail = [];
+        }
+      }
+
+      function frame(time) {
+        if (!running) return;
+        const delta = lastTime ? time - lastTime : 16.67;
+        lastTime = time;
+        update(delta);
+        draw(time);
+        if (running) animationId = requestAnimationFrame(frame);
+      }
+
+      function countdownFrame(time) {
+        if (!countdownActive) return;
+        const remaining = countdownUntil - time;
+        if (remaining <= 0) {
+          countdownActive = false;
+          running = true;
+          lastTime = 0;
+          gameAgainButton.disabled = false;
+          homeButton.hidden = false;
+          overlay.hidden = true;
+          gameToolbar.hidden = false;
+          pauseButton.disabled = false;
+          setPauseButtonMode("pause");
+          controls.hidden = false;
+          animationId = requestAnimationFrame(frame);
+          return;
+        }
+
+        const seconds = Math.ceil(remaining / 1000);
+        if (seconds !== lastCountdownNumber) {
+          lastCountdownNumber = seconds;
+          title.textContent = String(seconds);
+          gameAgainButton.textContent = String(seconds);
+        }
+        draw(time);
+        animationId = requestAnimationFrame(countdownFrame);
+      }
+
+      function start(preserveScore = false) {
+        cancelAnimationFrame(animationId);
+        clearContinueCountdown();
+        continueAction.hidden = true;
+        reset(preserveScore);
+        prepareAudio();
+        if (bgmEnabled) startBgm();
+        running = false;
+        isPaused = false;
+        countdownActive = true;
+        pointerActive = false;
+        keys.left = false;
+        keys.right = false;
+        homeScreen.hidden = true;
+        usageScreen.hidden = true;
+        shopScreen.hidden = true;
+        itemShopScreen.hidden = true;
+        settingsScreen.hidden = true;
+        gameView.hidden = false;
+        gameToolbar.hidden = true;
+        controls.hidden = true;
+        pauseButton.disabled = false;
+        setPauseButtonMode("pause");
+        gameAgainButton.hidden = Boolean(onlineMatch);
+        continueGameButton.hidden = false;
+        countdownUntil = performance.now() + 3000;
+        lastCountdownNumber = 0;
+        title.textContent = "3";
+        message.textContent = "준비하세요! 카운트다운이 끝나면 공이 움직입니다.";
+        gameAgainButton.textContent = "3";
+        gameAgainButton.disabled = true;
+        homeButton.hidden = true;
+        overlay.hidden = false;
+        animationId = requestAnimationFrame(countdownFrame);
+      }
+
+      function movePaddleFromPointer(event) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = width / rect.width;
+        const paddleWidth = effectivePaddleWidth();
+        paddle.targetX = (event.clientX - rect.left) * scaleX - paddleWidth / 2;
+        paddle.targetX = Math.max(0, Math.min(width - paddleWidth, paddle.targetX));
+        if (!running) {
+          paddle.x = paddle.targetX;
+          draw();
+        }
+      }
+
+      canvas.addEventListener("pointerdown", (event) => {
+        canvas.setPointerCapture(event.pointerId);
+        pointerActive = true;
+        movePaddleFromPointer(event);
+      });
+      canvas.addEventListener("pointermove", (event) => {
+        if (pointerActive) movePaddleFromPointer(event);
+      });
+      canvas.addEventListener("pointerup", () => { pointerActive = false; });
+      canvas.addEventListener("pointercancel", () => { pointerActive = false; });
+      canvas.addEventListener("lostpointercapture", () => { pointerActive = false; });
+
+      function bindHoldButton(id, key) {
+        const button = document.getElementById(id);
+        button.addEventListener("pointerdown", (event) => {
+          event.preventDefault();
+          button.setPointerCapture(event.pointerId);
+          keys[key] = true;
+        });
+        const release = () => { keys[key] = false; };
+        button.addEventListener("pointerup", release);
+        button.addEventListener("pointercancel", release);
+        button.addEventListener("lostpointercapture", release);
+      }
+
+      bindHoldButton("left-button", "left");
+      bindHoldButton("right-button", "right");
+
+      window.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowLeft" || event.key === "ArrowRight") event.preventDefault();
+        if (event.key === "ArrowLeft" || event.key.toLowerCase() === "a") keys.left = true;
+        if (event.key === "ArrowRight" || event.key.toLowerCase() === "d") keys.right = true;
+      });
+      window.addEventListener("keyup", (event) => {
+        if (event.key === "ArrowLeft" || event.key.toLowerCase() === "a") keys.left = false;
+        if (event.key === "ArrowRight" || event.key.toLowerCase() === "d") keys.right = false;
+      });
+      window.addEventListener("blur", () => {
+        keys.left = false;
+        keys.right = false;
+      });
+
+      startButton.addEventListener("click", () => start());
+      gameAgainButton.addEventListener("click", () => start());
+      continueGameButton.addEventListener("click", continueGame);
+      document.getElementById("register-button").addEventListener("click", () => authenticate("register"));
+      document.getElementById("login-button").addEventListener("click", () => authenticate("login"));
+      document.getElementById("logout-button").addEventListener("click", logout);
+      document.getElementById("friend-request-button").addEventListener("click", sendFriendRequest);
+      document.getElementById("friends-refresh-button").addEventListener("click", loadFriends);
+      onlinePlayButton.addEventListener("click", findOnlineMatch);
+      onlineCancelButton.addEventListener("click", cancelMatchmaking);
+      pauseButton.addEventListener("click", togglePause);
+      document.getElementById("usage-button").addEventListener("click", showUsage);
+      document.getElementById("usage-back-button").addEventListener("click", showHome);
+      document.getElementById("home-settings-button").addEventListener("click", () => openSettings(false));
+      document.getElementById("game-settings-button").addEventListener("click", () => openSettings(true));
+      document.getElementById("settings-back-button").addEventListener("click", closeSettings);
+      document.getElementById("shop-open-button").addEventListener("click", showShopHub);
+      document.getElementById("balls-shop-button").addEventListener("click", () => showShopCategory("balls"));
+      document.getElementById("paddles-shop-button").addEventListener("click", () => showShopCategory("paddles"));
+      document.getElementById("backgrounds-shop-button").addEventListener("click", () => showShopCategory("backgrounds"));
+      document.getElementById("shop-home-button").addEventListener("click", showHome);
+      document.getElementById("category-back-button").addEventListener("click", showShopHub);
+      shopSort.addEventListener("change", () => {
+        shopSortMode = shopSort.value;
+        renderShop(activeShopCategory);
+      });
+      homeButton.addEventListener("click", showHome);
+      settingsInputs.bgmEnabled.addEventListener("change", () => {
+        bgmEnabled = settingsInputs.bgmEnabled.checked;
+        persistProgress();
+        updateBgm();
+      });
+      settingsInputs.bgmVolume.addEventListener("input", () => {
+        bgmVolume = Number(settingsInputs.bgmVolume.value);
+        if (bgmMasterGain && audioContext) {
+          bgmMasterGain.gain.setTargetAtTime(bgmVolume, audioContext.currentTime, 0.05);
+        }
+        persistProgress();
+      });
+      settingsInputs.bgmTrack.addEventListener("change", () => {
+        bgmTrackId = settingsInputs.bgmTrack.value;
+        persistProgress();
+        updateBgm();
+      });
+      settingsInputs.sfxEnabled.addEventListener("change", () => {
+        sfxEnabled = settingsInputs.sfxEnabled.checked;
+        persistProgress();
+      });
+      settingsInputs.sfxVolume.addEventListener("input", () => {
+        sfxVolume = Number(settingsInputs.sfxVolume.value);
+        persistProgress();
+      });
+      loadProgress();
+      updatePointsDisplay();
+      updateSettingsUI();
+      renderShop("balls");
+      reset();
+      draw();
+      showHome();
+      loadLeaderboards();
+      refreshAccount();
+    })();
+  </script>
+</body>
+</html>

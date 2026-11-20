@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: bounce
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
+    envVars:
+      - key: BOUNCE_HTTPS
+        value: "1"
+      - key: BOUNCE_REQUIRE_POSTGRES
+        value: "1"
+      - key: DATABASE_URL
+        sync: false
