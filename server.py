@@ -27,6 +27,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 SESSION_COOKIE = "bounce_session"
 SESSION_SECONDS = 30 * 24 * 60 * 60
 PASSWORD_ITERATIONS = 310_000
+MATCHMAKING_TIMEOUT_SECONDS = 5 * 60
 USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_]{3,16}$")
 MAX_BODY_SIZE = 16_384
 RATE_LIMITS = {}
@@ -1017,7 +1018,8 @@ class BounceHandler(BaseHTTPRequestHandler):
                 self.send_error_json(400, "온라인 대전에는 300 포인트가 필요합니다.")
                 return
             connection.execute(
-                "DELETE FROM matchmaking_queue WHERE queued_at < ?", (now - 180,)
+                "DELETE FROM matchmaking_queue WHERE queued_at <= ?",
+                (now - MATCHMAKING_TIMEOUT_SECONDS,),
             )
             opponent = connection.execute(
                 """
@@ -1069,6 +1071,7 @@ class BounceHandler(BaseHTTPRequestHandler):
         self.send_json(200, {"state": "waiting"})
 
     def get_matchmaking_status(self):
+        now = int(time.time())
         with connect_database() as connection:
             user = self.require_user(connection)
             if not user:
@@ -1095,8 +1098,42 @@ class BounceHandler(BaseHTTPRequestHandler):
                 )
                 return
             queued = connection.execute(
-                "SELECT 1 FROM matchmaking_queue WHERE user_id = ?", (user["id"],)
+                "SELECT queued_at FROM matchmaking_queue WHERE user_id = ?",
+                (user["id"],),
             ).fetchone()
+            if queued and queued["queued_at"] <= now - MATCHMAKING_TIMEOUT_SECONDS:
+                cursor = connection.execute(
+                    "DELETE FROM matchmaking_queue WHERE user_id = ? AND queued_at = ?",
+                    (user["id"], queued["queued_at"]),
+                )
+                if cursor.rowcount:
+                    self.send_json(200, {"state": "expired"})
+                    return
+                active = connection.execute(
+                    """
+                    SELECT id FROM matches
+                    WHERE status = 'playing' AND (player1_id = ? OR player2_id = ?)
+                    ORDER BY created_at DESC LIMIT 1
+                    """,
+                    (user["id"], user["id"]),
+                ).fetchone()
+                if active:
+                    current = connection.execute(
+                        "SELECT points FROM users WHERE id = ?", (user["id"],)
+                    ).fetchone()
+                    self.send_json(
+                        200,
+                        {
+                            "state": "matched",
+                            "matchId": active["id"],
+                            "points": current["points"],
+                        },
+                    )
+                    return
+                queued = connection.execute(
+                    "SELECT queued_at FROM matchmaking_queue WHERE user_id = ?",
+                    (user["id"],),
+                ).fetchone()
         self.send_json(200, {"state": "waiting" if queued else "idle"})
 
     def get_match_status(self, match_id):
