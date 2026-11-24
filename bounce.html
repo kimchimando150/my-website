@@ -194,13 +194,6 @@
     .continue-countdown .timer-progress { stroke: #d6bd72; stroke-dasharray: 138.23; stroke-dashoffset: 0; transition: stroke-dashoffset .1s linear; }
     .continue-countdown span { position: relative; }
     .points { color: #ffd166; font-weight: 700; }
-    .leaderboards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; margin: 14px 0; text-align: left; }
-    .leaderboard { padding: 10px 12px; border: 1px solid #6c86a5; border-radius: 12px; background: #101c34aa; }
-    .leaderboard h3 { margin: 0 0 8px; font-size: 1rem; color: #cfe2ff; }
-    .leaderboard ol { display: grid; gap: 4px; margin: 0; padding-left: 24px; color: #dce7f5; font-size: .9rem; }
-    .leaderboard li { padding-left: 2px; }
-    .leaderboard li span { float: right; color: #ffd166; font-weight: 700; }
-    .leaderboard-status { min-height: 1.2em; margin: 4px 0; color: #aebfd5; font-size: .82rem; }
     .usage {
       margin: 12px 0;
       padding: 10px 12px;
@@ -298,22 +291,10 @@
         </div>
       </div>
       <div class="menu-actions">
-        <button class="restart" id="online-play-button" type="button" disabled>온라인 대전 찾기 · 300 포인트</button>
+        <button class="restart" id="online-play-button" type="button" disabled>온라인 대전 찾기</button>
         <button class="secondary" id="online-cancel-button" type="button" hidden>대전 찾기 취소</button>
       </div>
       <p class="online-status" id="online-status" aria-live="polite"></p>
-      <div class="leaderboards" aria-label="리더보드">
-        <section class="leaderboard">
-          <h3>공을 가장 많이 받은 사람</h3>
-          <ol id="catches-leaderboard"><li>기록을 불러오는 중...</li></ol>
-        </section>
-        <section class="leaderboard">
-          <h3>포인트가 가장 많은 사람</h3>
-          <ol id="points-leaderboard"><li>기록을 불러오는 중...</li></ol>
-        </section>
-      </div>
-      <p class="leaderboard-status" id="leaderboard-status" aria-live="polite"></p>
-      <p>온라인 대전은 입장 시 300 포인트가 필요하며, 승리하면 700 포인트를 받습니다.</p>
       <p>보유 포인트: <span class="points" id="home-points">0</span></p>
       <div class="menu-actions">
         <button class="restart" id="start-button" type="button">게임 시작</button>
@@ -462,7 +443,6 @@
       const onlineCancelButton = document.getElementById("online-cancel-button");
       const onlineStatus = document.getElementById("online-status");
       const matchStatus = document.getElementById("match-status");
-      const leaderboardStatus = document.getElementById("leaderboard-status");
       const friendsPanel = document.getElementById("friends-panel");
       const friendUsername = document.getElementById("friend-username");
       const friendMessage = document.getElementById("friend-message");
@@ -471,8 +451,6 @@
       let matchmakingTimer = 0;
       let matchPollingTimer = 0;
       let onlineRequestPending = false;
-      let pointsSyncPromise = Promise.resolve();
-      let pointsRevision = 0;
       const controls = document.getElementById("controls");
       const status = document.getElementById("status");
       const pauseButton = document.getElementById("pause-button");
@@ -961,83 +939,6 @@
         continueGameButton.disabled = points < 500;
       }
 
-      function applyAccountPoints(value) {
-        if (!Number.isSafeInteger(value) || value < 0) {
-          throw new Error("서버 포인트 데이터가 올바르지 않습니다.");
-        }
-        pointsRevision += 1;
-        points = value;
-        persistProgress();
-        updatePointsDisplay();
-      }
-
-      function changePoints(delta) {
-        points = Math.max(0, points + delta);
-        const revision = ++pointsRevision;
-        persistProgress();
-        updatePointsDisplay();
-        if (!onlineUser) return Promise.resolve();
-
-        const update = pointsSyncPromise.then(async () => {
-          const result = await onlineApi("/api/points", {
-            method: "POST",
-            body: JSON.stringify({ delta })
-          });
-          if (revision === pointsRevision) {
-            points = result.points;
-            persistProgress();
-            updatePointsDisplay();
-          }
-        });
-        pointsSyncPromise = update.catch(error => {
-          onlineStatus.textContent = `포인트 동기화 실패: ${error.message}`;
-        });
-        return pointsSyncPromise;
-      }
-
-      async function loadLeaderboards() {
-        const catchesList = document.getElementById("catches-leaderboard");
-        const pointsList = document.getElementById("points-leaderboard");
-        try {
-          const result = await onlineApi("/api/leaderboards");
-          const render = (list, entries, valueLabel) => {
-            list.replaceChildren();
-            if (entries.length === 0) {
-              const empty = document.createElement("li");
-              empty.textContent = "아직 등록된 기록이 없습니다.";
-              list.append(empty);
-              return;
-            }
-            for (const entry of entries) {
-              const row = document.createElement("li");
-              const value = document.createElement("span");
-              row.append(document.createTextNode(entry.username), value);
-              value.textContent = `${entry.value.toLocaleString()} ${valueLabel}`;
-              list.append(row);
-            }
-          };
-          render(catchesList, result.mostCaught, "회");
-          render(pointsList, result.mostPoints, "포인트");
-          leaderboardStatus.textContent = "";
-        } catch (error) {
-          leaderboardStatus.textContent = `리더보드를 불러오지 못했습니다: ${error.message}`;
-        }
-      }
-
-      async function submitBestCatches() {
-        if (!onlineUser) return;
-        try {
-          await pointsSyncPromise;
-          await onlineApi("/api/progress", {
-            method: "POST",
-            body: JSON.stringify({ bestCatches: score })
-          });
-          await loadLeaderboards();
-        } catch (error) {
-          leaderboardStatus.textContent = `기록 저장 실패: ${error.message}`;
-        }
-      }
-
       function persistProgress() {
         try {
           localStorage.setItem(SAVE_KEY, JSON.stringify({
@@ -1185,17 +1086,8 @@
 
       async function refreshAccount() {
         try {
-          let result = await onlineApi("/api/me");
+          const result = await onlineApi("/api/me");
           onlineUser = result.username;
-          if (onlineUser) {
-            if (!result.pointsInitialized) {
-              result = await onlineApi("/api/points/initialize", {
-                method: "POST",
-                body: JSON.stringify({ points })
-              });
-            }
-            applyAccountPoints(result.points);
-          }
           updateAccountUi();
           if (onlineUser) {
             await loadFriends();
@@ -1216,19 +1108,16 @@
             method: "POST",
             body: JSON.stringify({
               username: accountUsername.value.trim(),
-              password: accountPassword.value,
-              points
+              password: accountPassword.value
             })
           });
           onlineUser = result.username;
-          applyAccountPoints(result.points);
           accountPassword.value = "";
           accountMessage.textContent = mode === "register"
             ? "계정을 만들고 로그인했어요. 비밀번호를 잊으면 복구할 수 없습니다."
             : "로그인했습니다.";
           updateAccountUi();
           await loadFriends();
-          await loadLeaderboards();
         } catch (error) {
           accountMessage.textContent = error.message;
         }
@@ -1367,13 +1256,10 @@
         }
       }
 
-      async function enterOnlineMatch(matchId, accountPoints) {
+      function enterOnlineMatch(matchId) {
         window.clearInterval(matchmakingTimer);
         matchmakingTimer = 0;
         onlineCancelButton.hidden = true;
-        if (Number.isSafeInteger(accountPoints) && accountPoints >= 0) {
-          applyAccountPoints(accountPoints);
-        }
         onlineMatch = { id: matchId, opponent: "상대 플레이어", opponentScore: 0 };
         matchStatus.hidden = false;
         matchStatus.textContent = "상대를 기다리는 중...";
@@ -1388,13 +1274,12 @@
         onlinePlayButton.disabled = true;
         onlineStatus.textContent = "대전 상대를 찾고 있어요...";
         try {
-          await pointsSyncPromise;
           const result = await onlineApi("/api/matchmaking", {
             method: "POST",
             body: "{}"
           });
           if (result.state === "matched") {
-            await enterOnlineMatch(result.matchId, result.points);
+            enterOnlineMatch(result.matchId);
             return;
           }
           onlineCancelButton.hidden = false;
@@ -1410,7 +1295,13 @@
         try {
           const result = await onlineApi("/api/matchmaking");
           if (result.state === "matched") {
-            await enterOnlineMatch(result.matchId, result.points);
+            enterOnlineMatch(result.matchId);
+          } else if (result.state === "expired") {
+            onlineStatus.textContent = "5분 동안 상대를 찾지 못해 대전 찾기가 종료됐어요. 참가비는 차감되지 않았어요.";
+            window.clearInterval(matchmakingTimer);
+            matchmakingTimer = 0;
+            onlineCancelButton.hidden = true;
+            onlinePlayButton.disabled = false;
           } else if (result.state === "idle") {
             onlineStatus.textContent = "대기열에서 나왔어요. 다시 대전을 찾아주세요.";
             window.clearInterval(matchmakingTimer);
@@ -1482,17 +1373,12 @@
           if (result.state === "completed") {
             window.clearInterval(matchPollingTimer);
             matchPollingTimer = 0;
-            await pointsSyncPromise;
-            const account = await onlineApi("/api/me");
-            if (account.username === onlineUser) applyAccountPoints(account.points);
-            await loadLeaderboards();
             if (!running && !countdownActive) {
               title.textContent = result.winner === "you" ? "대전 승리" :
                 result.winner === "draw" ? "대전 무승부" : "대전 패배";
               message.textContent =
                 `내 생존 ${formatSurvivalTime(result.survivalTime)} · ` +
-                `${result.opponent} 생존 ${formatSurvivalTime(result.opponentSurvivalTime)}로 대전이 끝났어요.` +
-                (result.winner === "you" ? " 승리 보상 700 포인트를 받았습니다." : "");
+                `${result.opponent} 생존 ${formatSurvivalTime(result.opponentSurvivalTime)}로 대전이 끝났어요.`;
               gameAgainButton.hidden = true;
               continueAction.hidden = true;
             }
@@ -1610,7 +1496,7 @@
             action.textContent = "구매";
             action.addEventListener("click", () => {
               if (points < style.price) return;
-              changePoints(-style.price);
+              points -= style.price;
               addOwnedShopItem(category, style.id);
               selectShopItem(category, style.id);
               persistProgress();
@@ -1627,7 +1513,6 @@
 
       function showHome() {
         if (onlineMatch && (running || countdownActive)) syncOnlineMatch(true);
-        if (score > 0) submitBestCatches();
         running = false;
         countdownActive = false;
         isPaused = false;
@@ -1644,7 +1529,6 @@
         controls.hidden = true;
         startButton.disabled = false;
         updatePointsDisplay();
-        if (onlineUser) loadLeaderboards();
       }
 
       function showUsage() {
@@ -2260,7 +2144,6 @@
         running = false;
         countdownActive = false;
         isPaused = false;
-        submitBestCatches();
         if (onlineMatch) syncOnlineMatch(true);
         keys.left = false;
         keys.right = false;
@@ -2366,7 +2249,9 @@
         }
         clearContinueCountdown();
         continueAction.hidden = true;
-        changePoints(-500);
+        points -= 500;
+        persistProgress();
+        updatePointsDisplay();
         start(true);
       }
 
@@ -2616,9 +2501,11 @@
               notices.push("보너스 +500");
             }
             if (doublePointsActive) earnedPoints *= 2;
-            changePoints(earnedPoints);
+            points += earnedPoints;
             if (activateDoublePoints) doublePointsRemaining = 3;
             if (activateComboPoints) comboPointsRemaining = 5;
+            persistProgress();
+            updatePointsDisplay();
             status.textContent = persistenceWarning ||
               `받은 횟수 ${score} · 포인트 +${earnedPoints}${onlineMatch ? ` · 대전 ${onlineMatch.opponent} ${onlineMatch.opponentScore}회` : ""}${notices.length ? ` · ${notices.join(", ")}` : ""}${splitHitsRemaining ? ` · 합체까지 ${splitHitsRemaining}회 (${mergeHitCharge}/2)` : splitPending ? " · 다음 반환 시 분열" : splitCharge ? " · 분열 확률 확인 중" : ""}`;
           }
@@ -2775,8 +2662,8 @@
         keys.right = false;
       });
 
-      startButton.addEventListener("click", () => start());
-      gameAgainButton.addEventListener("click", () => start());
+      startButton.addEventListener("click", start);
+      gameAgainButton.addEventListener("click", start);
       continueGameButton.addEventListener("click", continueGame);
       document.getElementById("register-button").addEventListener("click", () => authenticate("register"));
       document.getElementById("login-button").addEventListener("click", () => authenticate("login"));
@@ -2834,7 +2721,6 @@
       reset();
       draw();
       showHome();
-      loadLeaderboards();
       refreshAccount();
     })();
   </script>
