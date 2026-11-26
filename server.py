@@ -148,6 +148,12 @@ def initialize_postgres_database():
             player2_seen BIGINT NOT NULL,
             player1_balls TEXT NOT NULL DEFAULT '[]',
             player2_balls TEXT NOT NULL DEFAULT '[]',
+            player1_paddle_x REAL NOT NULL DEFAULT 286,
+            player2_paddle_x REAL NOT NULL DEFAULT 286,
+            player1_paddle_width REAL NOT NULL DEFAULT 128,
+            player2_paddle_width REAL NOT NULL DEFAULT 128,
+            player1_paddle_style TEXT NOT NULL DEFAULT 'default',
+            player2_paddle_style TEXT NOT NULL DEFAULT 'default',
             started_at_ms BIGINT NOT NULL DEFAULT 0,
             player1_finished_at_ms BIGINT,
             player2_finished_at_ms BIGINT,
@@ -164,6 +170,12 @@ def initialize_postgres_database():
         match_migrations = {
             "player1_balls": "TEXT NOT NULL DEFAULT '[]'",
             "player2_balls": "TEXT NOT NULL DEFAULT '[]'",
+            "player1_paddle_x": "REAL NOT NULL DEFAULT 286",
+            "player2_paddle_x": "REAL NOT NULL DEFAULT 286",
+            "player1_paddle_width": "REAL NOT NULL DEFAULT 128",
+            "player2_paddle_width": "REAL NOT NULL DEFAULT 128",
+            "player1_paddle_style": "TEXT NOT NULL DEFAULT 'default'",
+            "player2_paddle_style": "TEXT NOT NULL DEFAULT 'default'",
             "started_at_ms": "BIGINT NOT NULL DEFAULT 0",
             "player1_finished_at_ms": "BIGINT",
             "player2_finished_at_ms": "BIGINT",
@@ -245,6 +257,12 @@ def initialize_database():
                 player2_seen INTEGER NOT NULL,
                 player1_balls TEXT NOT NULL DEFAULT '[]',
                 player2_balls TEXT NOT NULL DEFAULT '[]',
+                player1_paddle_x REAL NOT NULL DEFAULT 286,
+                player2_paddle_x REAL NOT NULL DEFAULT 286,
+                player1_paddle_width REAL NOT NULL DEFAULT 128,
+                player2_paddle_width REAL NOT NULL DEFAULT 128,
+                player1_paddle_style TEXT NOT NULL DEFAULT 'default',
+                player2_paddle_style TEXT NOT NULL DEFAULT 'default',
                 started_at_ms INTEGER NOT NULL DEFAULT 0,
                 player1_finished_at_ms INTEGER,
                 player2_finished_at_ms INTEGER,
@@ -263,6 +281,12 @@ def initialize_database():
         migrations = {
             "player1_balls": "TEXT NOT NULL DEFAULT '[]'",
             "player2_balls": "TEXT NOT NULL DEFAULT '[]'",
+            "player1_paddle_x": "REAL NOT NULL DEFAULT 286",
+            "player2_paddle_x": "REAL NOT NULL DEFAULT 286",
+            "player1_paddle_width": "REAL NOT NULL DEFAULT 128",
+            "player2_paddle_width": "REAL NOT NULL DEFAULT 128",
+            "player1_paddle_style": "TEXT NOT NULL DEFAULT 'default'",
+            "player2_paddle_style": "TEXT NOT NULL DEFAULT 'default'",
             "started_at_ms": "INTEGER NOT NULL DEFAULT 0",
             "player1_finished_at_ms": "INTEGER",
             "player2_finished_at_ms": "INTEGER",
@@ -478,6 +502,12 @@ class BounceHandler(BaseHTTPRequestHandler):
             request_path = path.strip("/").split("/")
             if len(request_path) == 3:
                 self.delete_friend_request(request_path[2])
+            else:
+                self.send_error_json(404, "요청한 주소를 찾을 수 없습니다.")
+        elif path.startswith("/api/matches/"):
+            match_id = path[len("/api/matches/") :].strip("/")
+            if match_id and "/" not in match_id:
+                self.abandon_match(match_id)
             else:
                 self.send_error_json(404, "요청한 주소를 찾을 수 없습니다.")
         elif path.startswith("/api/friends/"):
@@ -1172,6 +1202,42 @@ class BounceHandler(BaseHTTPRequestHandler):
                 return
         self.send_json(200, result)
 
+    def abandon_match(self, match_id):
+        now = int(time.time())
+        now_ms = int(time.time() * 1000)
+        with connect_database() as connection:
+            begin_write_transaction(connection)
+            user = self.require_user(connection)
+            if not user:
+                connection.rollback()
+                return
+            match = connection.execute(
+                "SELECT * FROM matches WHERE id = ? AND (player1_id = ? OR player2_id = ?)",
+                (match_id, user["id"], user["id"]),
+            ).fetchone()
+            if not match:
+                self.send_error_json(404, "대전을 찾을 수 없습니다.")
+                return
+            if match["status"] == "playing":
+                player1_finished_at = now_ms
+                player2_finished_at = now_ms
+                if user["id"] == match["player1_id"]:
+                    player1_finished_at = now_ms - 1
+                else:
+                    player2_finished_at = now_ms - 1
+                connection.execute(
+                    """
+                    UPDATE matches
+                    SET status = 'completed', completed_at = ?,
+                        player1_finished = 1, player2_finished = 1,
+                        player1_finished_at_ms = ?, player2_finished_at_ms = ?
+                    WHERE id = ?
+                    """,
+                    (now, player1_finished_at, player2_finished_at, match_id),
+                )
+            result = self.match_payload(connection, match_id, user["id"], now_ms)
+        self.send_json(200, {"ok": True, "winner": result["winner"]})
+
     def match_payload(self, connection, match_id, user_id, now_ms):
         match = connection.execute(
             """
@@ -1266,6 +1332,11 @@ class BounceHandler(BaseHTTPRequestHandler):
         rival_finished = match["player2_finished"] if is_player1 else match["player1_finished"]
         rival_name = match["player2_name"] if is_player1 else match["player1_name"]
         rival_balls = match["player2_balls"] if is_player1 else match["player1_balls"]
+        rival_paddle = {
+            "x": match["player2_paddle_x"] if is_player1 else match["player1_paddle_x"],
+            "width": match["player2_paddle_width"] if is_player1 else match["player1_paddle_width"],
+            "styleId": match["player2_paddle_style"] if is_player1 else match["player1_paddle_style"],
+        }
         own_points = connection.execute(
             "SELECT points FROM users WHERE id = ?", (user_id,)
         ).fetchone()["points"]
@@ -1285,6 +1356,7 @@ class BounceHandler(BaseHTTPRequestHandler):
             "survivalTime": round(own_survival, 2),
             "opponentSurvivalTime": round(rival_survival, 2),
             "balls": balls,
+            "opponentPaddle": rival_paddle,
             "points": own_points,
         }
 
@@ -1292,6 +1364,7 @@ class BounceHandler(BaseHTTPRequestHandler):
         score = payload.get("score")
         finished = payload.get("finished", False)
         balls = payload.get("balls", [])
+        paddle = payload.get("paddle", {})
         if not isinstance(score, int) or isinstance(score, bool) or score < 0:
             self.send_error_json(400, "점수 값이 올바르지 않습니다.")
             return
@@ -1300,6 +1373,28 @@ class BounceHandler(BaseHTTPRequestHandler):
             return
         if not isinstance(balls, list) or len(balls) > 24:
             self.send_error_json(400, "공 상태 데이터가 올바르지 않습니다.")
+            return
+        if not isinstance(paddle, dict):
+            self.send_error_json(400, "패들 상태 데이터가 올바르지 않습니다.")
+            return
+        paddle_x = paddle.get("x", 286)
+        paddle_width = paddle.get("width", 128)
+        paddle_style = paddle.get("styleId", "default")
+        if (
+            any(
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not math.isfinite(value)
+                for value in (paddle_x, paddle_width)
+            )
+            or paddle_x < 0
+            or paddle_width < 16
+            or paddle_width > 256
+            or paddle_x + paddle_width > 700
+            or not isinstance(paddle_style, str)
+            or not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", paddle_style)
+        ):
+            self.send_error_json(400, "패들 위치 데이터가 범위를 벗어났습니다.")
             return
         clean_balls = []
         for ball in balls:
@@ -1364,6 +1459,13 @@ class BounceHandler(BaseHTTPRequestHandler):
             finished_column = "player1_finished" if is_player1 else "player2_finished"
             balls_column = "player1_balls" if is_player1 else "player2_balls"
             seen_column = "player1_seen" if is_player1 else "player2_seen"
+            paddle_x_column = "player1_paddle_x" if is_player1 else "player2_paddle_x"
+            paddle_width_column = (
+                "player1_paddle_width" if is_player1 else "player2_paddle_width"
+            )
+            paddle_style_column = (
+                "player1_paddle_style" if is_player1 else "player2_paddle_style"
+            )
             finished_at_column = (
                 "player1_finished_at_ms" if is_player1 else "player2_finished_at_ms"
             )
@@ -1374,7 +1476,10 @@ class BounceHandler(BaseHTTPRequestHandler):
                     {finished} = CASE WHEN {finished} < ? THEN ? ELSE {finished} END,
                     {finished_at} = CASE WHEN ? THEN COALESCE({finished_at}, ?) ELSE {finished_at} END,
                     {seen} = ?,
-                    {balls} = ?
+                    {balls} = ?,
+                    {paddle_x} = ?,
+                    {paddle_width} = ?,
+                    {paddle_style} = ?
                 WHERE id = ?
                 """.format(
                     score=score_column,
@@ -1382,6 +1487,9 @@ class BounceHandler(BaseHTTPRequestHandler):
                     finished_at=finished_at_column,
                     seen=seen_column,
                     balls=balls_column,
+                    paddle_x=paddle_x_column,
+                    paddle_width=paddle_width_column,
+                    paddle_style=paddle_style_column,
                 ),
                 (
                     score,
@@ -1392,6 +1500,9 @@ class BounceHandler(BaseHTTPRequestHandler):
                     now_ms,
                     now,
                     json.dumps(clean_balls),
+                    paddle_x,
+                    paddle_width,
+                    paddle_style,
                     match_id,
                 ),
             )
