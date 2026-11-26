@@ -583,6 +583,8 @@
       const paddle = { x: 300, targetX: 300, y: height - 58, width: 128, height: 16, speed: 5.2 };
       const keys = { left: false, right: false };
       const BALL_RADIUS = 9;
+      const REMOTE_INTERPOLATION_MS = 260;
+      const REMOTE_EXTRAPOLATION_MS = 120;
       const BOOST_CHANCE = 0.16;
       const NIGHT_CHANCE = 0.10;
       const SPLIT_CHANCE = 0.10;
@@ -612,6 +614,7 @@
       }));
       let balls = [];
       let opponentBalls = [];
+      let opponentPaddle = null;
       let running = false;
       let isPaused = false;
       let countdownActive = false;
@@ -850,6 +853,35 @@
 
       function ballStyleFor(id) {
         return ballStyles.find(style => style.id === id) || ballStyles[0];
+      }
+
+      function opponentHueRotation(color) {
+        const hex = color.replace("#", "");
+        const red = parseInt(hex.slice(0, 2), 16) / 255;
+        const green = parseInt(hex.slice(2, 4), 16) / 255;
+        const blue = parseInt(hex.slice(4, 6), 16) / 255;
+        const maximum = Math.max(red, green, blue);
+        const minimum = Math.min(red, green, blue);
+        const difference = maximum - minimum;
+        let hue = 0;
+        if (difference) {
+          if (maximum === red) hue = ((green - blue) / difference) % 6;
+          else if (maximum === green) hue = (blue - red) / difference + 2;
+          else hue = (red - green) / difference + 4;
+          hue *= 60;
+          if (hue < 0) hue += 360;
+        }
+        const targetHue = hue >= 190 && hue < 260 ? 0
+          : hue >= 35 && hue < 75 ? 125
+            : hue < 35 || hue >= 330 ? 210
+              : hue >= 75 && hue < 165 ? 285
+                : hue >= 165 && hue < 205 ? 25
+                  : 48;
+        return (targetHue - hue + 360) % 360;
+      }
+
+      function opponentColorFilter(color) {
+        return `hue-rotate(${opponentHueRotation(color)}deg) saturate(1.5)`;
       }
 
       function ballPowerFor(id) {
@@ -1405,8 +1437,35 @@
         }
       }
 
+      async function leaveOnlineMatch(match, retry = false) {
+        if (!match || (match.leaving && !retry)) return;
+        match.leaving = true;
+        window.clearTimeout(matchPollingTimer);
+        matchPollingTimer = 0;
+        try {
+          await onlineApi(`/api/matches/${encodeURIComponent(match.id)}`, {
+            method: "DELETE"
+          });
+          if (onlineMatch !== match) return;
+          onlineMatch = null;
+          opponentBalls = [];
+          opponentPaddle = null;
+          matchRetryDelay = 1000;
+          onlineStatus.textContent = "대전에서 나왔어요. 다시 대전을 찾아주세요.";
+          updateAccountUi();
+        } catch (error) {
+          if (onlineMatch !== match) return;
+          onlineStatus.textContent = `대전 종료 실패: ${error.message}`;
+          matchPollingTimer = window.setTimeout(
+            () => leaveOnlineMatch(match, true),
+            matchRetryDelay
+          );
+          matchRetryDelay = Math.min(matchRetryDelay * 2, 15000);
+        }
+      }
+
       async function syncOnlineMatch(finished = false) {
-        if (!onlineMatch || onlineRequestPending) return;
+        if (!onlineMatch || onlineMatch.leaving || onlineRequestPending) return;
         onlineRequestPending = true;
         const match = onlineMatch;
         let retryDelay = null;
@@ -1429,12 +1488,17 @@
             body: JSON.stringify({
               score,
               finished: playerFinished,
-              balls: ownBalls
+              balls: ownBalls,
+              paddle: {
+                x: paddle.x,
+                width: effectivePaddleWidth(),
+                styleId: selectedPaddleId
+              }
             })
           });
           if (onlineMatch !== match) return;
           matchRetryDelay = 1000;
-          updateOpponentBalls(result.balls);
+          updateOpponentBalls(result.balls, result.opponentPaddle);
           match.opponent = result.opponent;
           match.opponentScore = result.opponentScore;
           matchStatus.textContent = result.state === "completed"
@@ -1450,15 +1514,25 @@
             }
             window.clearTimeout(matchPollingTimer);
             matchPollingTimer = 0;
-            if (!running && !countdownActive) {
-              title.textContent = result.winner === "you" ? "대전 승리" :
-                result.winner === "draw" ? "대전 무승부" : "대전 패배";
-              message.textContent =
-                `내 생존 ${formatSurvivalTime(result.survivalTime)} · ` +
-                `${result.opponent} 생존 ${formatSurvivalTime(result.opponentSurvivalTime)}로 대전이 끝났어요.`;
-              gameAgainButton.hidden = true;
-              continueAction.hidden = true;
-            }
+            running = false;
+            countdownActive = false;
+            isPaused = false;
+            cancelAnimationFrame(animationId);
+            keys.left = false;
+            keys.right = false;
+            gameView.hidden = false;
+            gameToolbar.hidden = false;
+            controls.hidden = true;
+            pauseButton.disabled = true;
+            homeButton.hidden = false;
+            title.textContent = result.winner === "you" ? "대전 승리" :
+              result.winner === "draw" ? "대전 무승부" : "대전 패배";
+            message.textContent =
+              `내 생존 ${formatSurvivalTime(result.survivalTime)} · ` +
+              `${result.opponent} 생존 ${formatSurvivalTime(result.opponentSurvivalTime)}로 대전이 끝났어요.`;
+            gameAgainButton.hidden = true;
+            continueAction.hidden = true;
+            overlay.hidden = false;
             onlineMatch = null;
             updateAccountUi();
           }
@@ -1468,7 +1542,7 @@
           matchRetryDelay = Math.min(matchRetryDelay * 2, 15000);
         } finally {
           onlineRequestPending = false;
-          if (onlineMatch === match) {
+          if (onlineMatch === match && !match.leaving) {
             matchPollingTimer = window.setTimeout(
               () => syncOnlineMatch(),
               retryDelay === null ? 300 : retryDelay
@@ -1477,20 +1551,26 @@
         }
       }
 
-      function updateOpponentBalls(snapshots) {
+      function updateOpponentBalls(snapshots, paddleSnapshot) {
         if (!Array.isArray(snapshots)) return;
         const existing = new Map(opponentBalls.map(ball => [ball.id, ball]));
         const now = performance.now();
+        updateOpponentBallPositions(now);
         opponentBalls = snapshots.map(snapshot => {
           const ball = existing.get(snapshot.id) || {
             id: snapshot.id,
+            x: snapshot.x,
+            y: snapshot.y,
             isOpponent: true,
             trail: [],
             powerReadyAt: 0
           };
           Object.assign(ball, {
-            x: snapshot.x,
-            y: snapshot.y,
+            fromX: ball.x,
+            fromY: ball.y,
+            targetX: snapshot.x,
+            targetY: snapshot.y,
+            interpolationStartedAt: now,
             vx: snapshot.vx,
             vy: snapshot.vy,
             radius: snapshot.radius,
@@ -1500,6 +1580,30 @@
           });
           return ball;
         });
+        if (paddleSnapshot && Number.isFinite(paddleSnapshot.x)) {
+          opponentPaddle = {
+            x: paddleSnapshot.x,
+            width: paddleSnapshot.width,
+            styleId: paddleSnapshot.styleId
+          };
+        }
+      }
+
+      function updateOpponentBallPositions(time) {
+        for (const ball of opponentBalls) {
+          const elapsed = Math.max(0, time - ball.interpolationStartedAt);
+          const progress = Math.min(1, elapsed / REMOTE_INTERPOLATION_MS);
+          ball.x = ball.fromX + (ball.targetX - ball.fromX) * progress;
+          ball.y = ball.fromY + (ball.targetY - ball.fromY) * progress;
+          if (elapsed > REMOTE_INTERPOLATION_MS) {
+            const extrapolation = Math.min(
+              elapsed - REMOTE_INTERPOLATION_MS,
+              REMOTE_EXTRAPOLATION_MS
+            ) / 16.67;
+            ball.x += ball.vx * extrapolation;
+            ball.y += ball.vy * extrapolation;
+          }
+        }
       }
 
       function formatSurvivalTime(seconds) {
@@ -1598,7 +1702,7 @@
       }
 
       function showHome() {
-        if (onlineMatch && (running || countdownActive)) syncOnlineMatch(true);
+        if (onlineMatch) void leaveOnlineMatch(onlineMatch);
         running = false;
         countdownActive = false;
         isPaused = false;
@@ -1697,6 +1801,7 @@
           trail: []
         }];
         opponentBalls = [];
+        opponentPaddle = null;
         splitHitsRemaining = 0;
         splitCharge = 0;
         splitPending = false;
@@ -1715,6 +1820,35 @@
         comboPointsRemaining = 0;
         precisionUntil = 0;
         status.textContent = `받은 횟수: ${score} · 웨이브 ${currentWave}`;
+      }
+
+      function drawPaddleAt(x, y, paddleWidth, style, opponent = false) {
+        ctx.save();
+        if (opponent) ctx.filter = opponentColorFilter(style.color);
+        ctx.shadowColor = style.color;
+        ctx.shadowBlur = 20;
+        const gradient = ctx.createLinearGradient(x, y, x, y + paddle.height);
+        gradient.addColorStop(0, style.light);
+        gradient.addColorStop(0.35, style.color);
+        gradient.addColorStop(1, style.dark);
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.roundRect(x, y, paddleWidth, paddle.height, 7);
+        ctx.fill();
+        if (style.shape === "clock") {
+          const centerX = x + paddleWidth / 2;
+          const centerY = y + paddle.height / 2;
+          ctx.strokeStyle = "#fff1b1dd";
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, paddle.height * 0.32, 0, Math.PI * 2);
+          ctx.moveTo(centerX, centerY);
+          ctx.lineTo(centerX, centerY - paddle.height * 0.22);
+          ctx.moveTo(centerX, centerY);
+          ctx.lineTo(centerX + paddle.height * 0.2, centerY + paddle.height * 0.08);
+          ctx.stroke();
+        }
+        ctx.restore();
       }
 
       function draw(time = performance.now()) {
@@ -1831,7 +1965,8 @@
           ctx.fillText("정밀 조준", width - 100, 108);
         }
 
-        for (const ball of [...balls, ...opponentBalls]) {
+        updateOpponentBallPositions(time);
+        for (const ball of [...opponentBalls, ...balls]) {
           if (time < splitEffectUntil) {
             const progress = 1 - (splitEffectUntil - time) / 900;
             ctx.save();
@@ -1859,6 +1994,7 @@
           ctx.shadowColor = ball.boostUntil > time ? "#ff9d32" : "#71c7ff";
           ctx.shadowBlur = ball.boostUntil > time ? 24 : 14;
           const style = ballStyleFor(ball.styleId);
+          if (ball.isOpponent) ctx.filter = opponentColorFilter(style.color);
           const ballGradient = ctx.createRadialGradient(
             ball.x - 3, ball.y - 4, 1, ball.x, ball.y, ball.radius
           );
@@ -2168,45 +2304,22 @@
             ctx.fill();
           }
           ctx.restore();
-          if (ball.isOpponent) {
-            ctx.save();
-            ctx.strokeStyle = "#ff91cf";
-            ctx.lineWidth = 2;
-            ctx.setLineDash([3, 3]);
-            ctx.beginPath();
-            ctx.arc(ball.x, ball.y, ball.radius + 3, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.restore();
-          }
         }
 
-        ctx.save();
-        const paddleStyle = currentPaddleStyle();
         const paddleWidth = effectivePaddleWidth(time);
-        ctx.shadowColor = paddleStyle.color;
-        ctx.shadowBlur = 20;
-        const paddleGradient = ctx.createLinearGradient(paddle.x, paddle.y, paddle.x, paddle.y + paddle.height);
-        paddleGradient.addColorStop(0, paddleStyle.light);
-        paddleGradient.addColorStop(0.35, paddleStyle.color);
-        paddleGradient.addColorStop(1, paddleStyle.dark);
-        ctx.fillStyle = paddleGradient;
-        ctx.beginPath();
-        ctx.roundRect(paddle.x, paddle.y, paddleWidth, paddle.height, 7);
-        ctx.fill();
-        ctx.restore();
-        if (paddleStyle.shape === "clock") {
-          const centerX = paddle.x + paddleWidth / 2;
-          const centerY = paddle.y + paddle.height / 2;
-          ctx.strokeStyle = "#fff1b1dd";
-          ctx.lineWidth = 1.5;
-          ctx.beginPath();
-          ctx.arc(centerX, centerY, paddle.height * 0.32, 0, Math.PI * 2);
-          ctx.moveTo(centerX, centerY);
-          ctx.lineTo(centerX, centerY - paddle.height * 0.22);
-          ctx.moveTo(centerX, centerY);
-          ctx.lineTo(centerX + paddle.height * 0.2, centerY + paddle.height * 0.08);
-          ctx.stroke();
+        if (onlineMatch && opponentPaddle) {
+          const opponentStyle = paddleStyles.find(
+            style => style.id === opponentPaddle.styleId
+          ) || paddleStyles[0];
+          drawPaddleAt(
+            opponentPaddle.x,
+            paddle.y,
+            opponentPaddle.width,
+            opponentStyle,
+            true
+          );
         }
+        drawPaddleAt(paddle.x, paddle.y, paddleWidth, currentPaddleStyle());
 
         if (time < nightUntil) {
           const light = ctx.createRadialGradient(
@@ -2347,27 +2460,50 @@
           for (let second = first + 1; second < activeBalls.length; second += 1) {
             const ballA = activeBalls[first];
             const ballB = activeBalls[second];
-            const dx = ballB.x - ballA.x;
-            const dy = ballB.y - ballA.y;
+            if (!onlineMatch) {
+              const dx = ballB.x - ballA.x;
+              const dy = ballB.y - ballA.y;
+              const minimumDistance = ballA.radius + ballB.radius;
+              const distance = Math.hypot(dx, dy);
+              if (distance === 0 || distance >= minimumDistance) continue;
+              const angle = Math.random() * Math.PI * 2;
+              const normalX = Math.cos(angle);
+              const normalY = Math.sin(angle);
+              const overlap = (minimumDistance - distance) / 2 + 0.1;
+              ballA.x -= normalX * overlap;
+              ballA.y -= normalY * overlap;
+              ballB.x += normalX * overlap;
+              ballB.y += normalY * overlap;
+              const speedA = Math.max(2, Math.hypot(ballA.vx, ballA.vy));
+              const speedB = Math.max(2, Math.hypot(ballB.vx, ballB.vy));
+              ballA.vx = normalX * speedA;
+              ballA.vy = normalY * speedA;
+              ballB.vx = -normalX * speedB;
+              ballB.vy = -normalY * speedB;
+              continue;
+            }
+            if (ballA.isOpponent === ballB.isOpponent) continue;
+            const localBall = ballA.isOpponent ? ballB : ballA;
+            const remoteBall = ballA.isOpponent ? ballA : ballB;
+            const dx = remoteBall.x - localBall.x;
+            const dy = remoteBall.y - localBall.y;
             const minimumDistance = ballA.radius + ballB.radius;
             const distance = Math.hypot(dx, dy);
             if (distance === 0 || distance >= minimumDistance) continue;
 
-            const angle = Math.random() * Math.PI * 2;
-            const normalX = Math.cos(angle);
-            const normalY = Math.sin(angle);
-            const overlap = (minimumDistance - distance) / 2 + 0.1;
-            ballA.x -= normalX * overlap;
-            ballA.y -= normalY * overlap;
-            ballB.x += normalX * overlap;
-            ballB.y += normalY * overlap;
+            const normalX = dx / distance;
+            const normalY = dy / distance;
+            const overlap = minimumDistance - distance + 0.1;
+            localBall.x -= normalX * overlap;
+            localBall.y -= normalY * overlap;
 
-            const speedA = Math.max(2, Math.hypot(ballA.vx, ballA.vy));
-            const speedB = Math.max(2, Math.hypot(ballB.vx, ballB.vy));
-            ballA.vx = normalX * speedA;
-            ballA.vy = normalY * speedA;
-            ballB.vx = -normalX * speedB;
-            ballB.vy = -normalY * speedB;
+            const relativeSpeed =
+              (remoteBall.vx - localBall.vx) * normalX +
+              (remoteBall.vy - localBall.vy) * normalY;
+            if (relativeSpeed < 0) {
+              localBall.vx += relativeSpeed * normalX;
+              localBall.vy += relativeSpeed * normalY;
+            }
           }
         }
       }
@@ -2375,6 +2511,7 @@
       function update(delta) {
         const time = performance.now();
         const frameScale = Math.min(delta / 16.67, 2);
+        updateOpponentBallPositions(time);
         if (pointerActive) {
           const dragDelta = paddle.targetX - paddle.x;
           const maxDragStep = 7 * frameScale;
@@ -2388,7 +2525,7 @@
 
         const ballFrameScale = time < slowUntil ? frameScale * 0.65 : frameScale;
         const newBalls = [];
-        const activeBalls = [...balls, ...opponentBalls];
+        const activeBalls = balls;
         for (const ball of activeBalls) {
           if (ball.boostUntil && time >= ball.boostUntil) {
             ball.vx /= BOOST_MULTIPLIER;
@@ -2416,11 +2553,24 @@
           }
 
           const ballBottom = ball.y + ball.radius;
-          const overlapsPaddle =
+          const overlapsOwnPaddle =
             ball.x + ball.radius >= paddle.x &&
             ball.x - ball.radius <= paddle.x + paddleWidth;
-          if (ball.vy > 0 && previousBottom <= paddle.y &&
-              ballBottom >= paddle.y && overlapsPaddle) {
+          const overlapsOpponentPaddle = onlineMatch && opponentPaddle &&
+            ball.x + ball.radius >= opponentPaddle.x &&
+            ball.x - ball.radius <= opponentPaddle.x + opponentPaddle.width;
+          const hitOwnPaddle = overlapsOwnPaddle;
+          const hitOpponentPaddle = !hitOwnPaddle && overlapsOpponentPaddle;
+          const crossedPaddle = ball.vy > 0 &&
+            previousBottom <= paddle.y && ballBottom >= paddle.y;
+          if (crossedPaddle && hitOpponentPaddle) {
+            ball.y = paddle.y - ball.radius;
+            ball.vy = -Math.abs(ball.vy);
+            const hitOffset = (ball.x - (opponentPaddle.x + opponentPaddle.width / 2)) /
+              (opponentPaddle.width / 2);
+            ball.vx = Math.max(-5, Math.min(5, ball.vx + hitOffset * 1.3));
+          }
+          if (crossedPaddle && hitOwnPaddle) {
             ball.y = paddle.y - ball.radius;
             const notices = [];
             const factor = ball.boostUntil ? BOOST_MULTIPLIER : 1;
@@ -2513,7 +2663,7 @@
               Math.random() < effectChance(WAVE_BUFF_CHANCE);
             if (slowTriggered) {
               lastSlowAt = time;
-              const effectBalls = [...balls, ...opponentBalls, ...newBalls];
+              const effectBalls = [...balls, ...newBalls];
               const boostedBalls = effectBalls.filter(activeBall => activeBall.boostUntil > time);
               if (boostedBalls.length > 0) {
                 for (const boostedBall of boostedBalls) {
@@ -2528,7 +2678,7 @@
                 notices.push("시간 왜곡");
               }
             }
-            const effectBalls = [...balls, ...opponentBalls, ...newBalls];
+            const effectBalls = [...balls, ...newBalls];
             if (!slowTriggered && !effectBalls.some(activeBall => activeBall.boostUntil > time) &&
                 Math.random() < effectChance(BOOST_CHANCE)) {
               for (const activeBall of effectBalls) {
@@ -2544,7 +2694,7 @@
               time,
               notices,
               newBalls,
-              [...balls, ...opponentBalls, ...newBalls]
+              [...balls, ...newBalls]
             );
             let specialBonusPoints = 0;
             let activateDoublePoints = false;
