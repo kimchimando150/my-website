@@ -1067,7 +1067,14 @@
           }
           throw new Error("온라인 서버 응답 형식이 올바르지 않습니다. `python server.py`로 실행해 주세요.");
         }
-        if (!response.ok) throw new Error(data.error || "온라인 요청에 실패했습니다.");
+        if (!response.ok) {
+          const detail = [data.error, data.message]
+            .find(value => typeof value === "string" && value.trim());
+          throw new Error(
+            `온라인 서버가 ${response.status} 오류를 반환했습니다` +
+            (detail ? `: ${detail}` : ".")
+          );
+        }
         return data;
       }
 
