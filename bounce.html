@@ -450,6 +450,7 @@
       let onlineMatch = null;
       let matchmakingTimer = 0;
       let matchPollingTimer = 0;
+      let matchRetryDelay = 1000;
       let onlineRequestPending = false;
       let pointsSyncPromise = null;
       let pendingPointsDelta = 0;
@@ -1325,6 +1326,9 @@
       function enterOnlineMatch(matchId, accountPoints) {
         window.clearInterval(matchmakingTimer);
         matchmakingTimer = 0;
+        window.clearTimeout(matchPollingTimer);
+        matchPollingTimer = 0;
+        matchRetryDelay = 1000;
         onlineCancelButton.hidden = true;
         if (Number.isSafeInteger(accountPoints) && accountPoints >= 0) {
           applyAccountPoints({ points: accountPoints });
@@ -1334,8 +1338,6 @@
         matchStatus.textContent = "상대를 기다리는 중...";
         updateAccountUi();
         start();
-        window.clearInterval(matchPollingTimer);
-        matchPollingTimer = window.setInterval(syncOnlineMatch, 120);
         syncOnlineMatch();
       }
 
@@ -1407,6 +1409,7 @@
         if (!onlineMatch || onlineRequestPending) return;
         onlineRequestPending = true;
         const match = onlineMatch;
+        let retryDelay = null;
         try {
           const playerFinished = finished || (!running && !countdownActive && !isPaused);
           const ownBalls = playerFinished ? [] : balls.filter(ball =>
@@ -1430,6 +1433,7 @@
             })
           });
           if (onlineMatch !== match) return;
+          matchRetryDelay = 1000;
           updateOpponentBalls(result.balls);
           match.opponent = result.opponent;
           match.opponentScore = result.opponentScore;
@@ -1444,7 +1448,7 @@
             if (Number.isSafeInteger(result.points) && result.points >= 0) {
               applyAccountPoints({ points: result.points });
             }
-            window.clearInterval(matchPollingTimer);
+            window.clearTimeout(matchPollingTimer);
             matchPollingTimer = 0;
             if (!running && !countdownActive) {
               title.textContent = result.winner === "you" ? "대전 승리" :
@@ -1460,8 +1464,16 @@
           }
         } catch (error) {
           matchStatus.textContent = `대전 서버 연결 오류: ${error.message}`;
+          retryDelay = matchRetryDelay;
+          matchRetryDelay = Math.min(matchRetryDelay * 2, 15000);
         } finally {
           onlineRequestPending = false;
+          if (onlineMatch === match) {
+            matchPollingTimer = window.setTimeout(
+              () => syncOnlineMatch(),
+              retryDelay === null ? 300 : retryDelay
+            );
+          }
         }
       }
 
