@@ -103,6 +103,17 @@
     .friend-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
     .friend-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
     .friend-row-actions { display: flex; gap: 6px; }
+    .leaderboards { margin: 12px 0; padding: 12px; border: 1px solid #6c86a5; border-radius: 12px; background: #101c34aa; }
+    .leaderboards h2 { margin: 0 0 10px; font-size: 1.1rem; }
+    .leaderboard-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; text-align: left; }
+    .leaderboard-card { min-width: 0; padding: 8px; border-radius: 8px; background: #0b1528aa; }
+    .leaderboard-card h3 { margin: 0 0 6px; color: #cfe2ff; font-size: .9rem; }
+    .leaderboard-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: .78rem; }
+    .leaderboard-entry { display: flex; justify-content: space-between; gap: 5px; }
+    .leaderboard-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .leaderboard-value { flex: 0 0 auto; color: #ffd166; }
+    .leaderboard-message { min-height: 1.2em; margin: 8px 0 4px; color: #c4d1e2; font-size: .82rem; }
+    .leaderboards button { min-height: 38px; padding: 4px 10px; font-size: .88rem; }
     .secondary {
       padding: 8px 16px;
       font-size: 1rem;
@@ -296,6 +307,21 @@
       </div>
       <p class="online-status" id="online-status" aria-live="polite"></p>
       <p>보유 포인트: <span class="points" id="home-points">0</span></p>
+      <section class="leaderboards" aria-labelledby="leaderboards-title">
+        <h2 id="leaderboards-title">랭킹</h2>
+        <div class="leaderboard-grid">
+          <section class="leaderboard-card" aria-labelledby="catches-leaderboard-title">
+            <h3 id="catches-leaderboard-title">최다 생존</h3>
+            <ol class="leaderboard-list" id="catches-leaderboard"></ol>
+          </section>
+          <section class="leaderboard-card" aria-labelledby="points-leaderboard-title">
+            <h3 id="points-leaderboard-title">최고 포인트</h3>
+            <ol class="leaderboard-list" id="points-leaderboard"></ol>
+          </section>
+        </div>
+        <p class="leaderboard-message" id="leaderboard-message" aria-live="polite"></p>
+        <button class="secondary" id="leaderboards-refresh-button" type="button">랭킹 새로고침</button>
+      </section>
       <div class="menu-actions">
         <button class="restart" id="start-button" type="button">게임 시작</button>
         <button class="secondary" id="usage-button" type="button">사용법</button>
@@ -443,6 +469,9 @@
       const onlineCancelButton = document.getElementById("online-cancel-button");
       const onlineStatus = document.getElementById("online-status");
       const matchStatus = document.getElementById("match-status");
+      const catchesLeaderboard = document.getElementById("catches-leaderboard");
+      const pointsLeaderboard = document.getElementById("points-leaderboard");
+      const leaderboardMessage = document.getElementById("leaderboard-message");
       const friendsPanel = document.getElementById("friends-panel");
       const friendUsername = document.getElementById("friend-username");
       const friendMessage = document.getElementById("friend-message");
@@ -452,6 +481,7 @@
       let matchPollingTimer = 0;
       let matchRetryDelay = 1000;
       let onlineRequestPending = false;
+      let serverClockOffsetMs = null;
       let pointsSyncPromise = null;
       let pendingPointsDelta = 0;
       const controls = document.getElementById("controls");
@@ -583,8 +613,9 @@
       const paddle = { x: 300, targetX: 300, y: height - 58, width: 128, height: 16, speed: 5.2 };
       const keys = { left: false, right: false };
       const BALL_RADIUS = 9;
-      const REMOTE_RENDER_DELAY_MS = 180;
-      const REMOTE_MAX_EXTRAPOLATION_MS = 180;
+      const REMOTE_RENDER_DELAY_MS = 300;
+      const REMOTE_MAX_EXTRAPOLATION_MS = 300;
+      const REMOTE_MAX_SAMPLE_GAP_MS = 1500;
       const BOOST_CHANCE = 0.16;
       const NIGHT_CHANCE = 0.10;
       const SPLIT_CHANCE = 0.10;
@@ -632,6 +663,7 @@
       let splitEffectUntil = 0;
       let nightUntil = 0;
       let countdownUntil = 0;
+      let countdownServerDeadlineMs = null;
       let lastCountdownNumber = 0;
       let flashStarted = 0;
       let flashUntil = 0;
@@ -1111,6 +1143,51 @@
         return data;
       }
 
+      function renderLeaderboard(list, entries) {
+        list.replaceChildren();
+        if (!Array.isArray(entries)) {
+          throw new Error("랭킹 데이터 형식이 올바르지 않습니다.");
+        }
+        if (entries.length === 0) {
+          const empty = document.createElement("li");
+          empty.textContent = "아직 기록이 없습니다.";
+          list.append(empty);
+          return;
+        }
+        for (const [index, entry] of entries.slice(0, 10).entries()) {
+          if (
+            !entry ||
+            typeof entry.username !== "string" ||
+            !Number.isSafeInteger(entry.value) ||
+            entry.value < 0
+          ) {
+            throw new Error("랭킹 항목이 올바르지 않습니다.");
+          }
+          const row = document.createElement("li");
+          row.className = "leaderboard-entry";
+          const name = document.createElement("span");
+          name.className = "leaderboard-name";
+          name.textContent = `${index + 1}. ${entry.username}`;
+          const value = document.createElement("span");
+          value.className = "leaderboard-value";
+          value.textContent = entry.value.toLocaleString("ko-KR");
+          row.append(name, value);
+          list.append(row);
+        }
+      }
+
+      async function loadLeaderboards() {
+        leaderboardMessage.textContent = "랭킹을 불러오는 중...";
+        try {
+          const data = await onlineApi("/api/leaderboards");
+          renderLeaderboard(catchesLeaderboard, data.mostCaught);
+          renderLeaderboard(pointsLeaderboard, data.mostPoints);
+          leaderboardMessage.textContent = "";
+        } catch (error) {
+          leaderboardMessage.textContent = `랭킹을 불러오지 못했어요: ${error.message}`;
+        }
+      }
+
       function updateAccountUi() {
         const loggedIn = Boolean(onlineUser);
         accountState.textContent = loggedIn
@@ -1355,7 +1432,7 @@
         }
       }
 
-      function enterOnlineMatch(matchId, accountPoints) {
+      function enterOnlineMatch(matchId, accountPoints, gameStartAtMs) {
         window.clearInterval(matchmakingTimer);
         matchmakingTimer = 0;
         window.clearTimeout(matchPollingTimer);
@@ -1369,7 +1446,7 @@
         matchStatus.hidden = false;
         matchStatus.textContent = "상대를 기다리는 중...";
         updateAccountUi();
-        start();
+        start(false, gameStartAtMs);
         syncOnlineMatch();
       }
 
@@ -1378,12 +1455,14 @@
         onlineStatus.textContent = "대전 상대를 찾고 있어요...";
         try {
           await flushAccountPoints();
+          const requestStartedAt = performance.now();
           const result = await onlineApi("/api/matchmaking", {
             method: "POST",
             body: "{}"
           });
+          updateServerClock(result.serverTimeMs, requestStartedAt, performance.now());
           if (result.state === "matched") {
-            enterOnlineMatch(result.matchId, result.points);
+            enterOnlineMatch(result.matchId, result.points, result.gameStartAtMs);
             return;
           }
           onlineCancelButton.hidden = false;
@@ -1397,9 +1476,11 @@
 
       async function checkMatchmaking() {
         try {
+          const requestStartedAt = performance.now();
           const result = await onlineApi("/api/matchmaking");
+          updateServerClock(result.serverTimeMs, requestStartedAt, performance.now());
           if (result.state === "matched") {
-            enterOnlineMatch(result.matchId, result.points);
+            enterOnlineMatch(result.matchId, result.points, result.gameStartAtMs);
           } else if (result.state === "expired") {
             onlineStatus.textContent = "5분 동안 상대를 찾지 못해 대전 찾기가 종료됐어요. 참가비는 차감되지 않았어요.";
             window.clearInterval(matchmakingTimer);
@@ -1483,6 +1564,7 @@
             styleId: ball.styleId || selectedBallId,
             boosted: ball.boostUntil > performance.now()
           }));
+          const requestStartedAt = performance.now();
           const result = await onlineApi(`/api/matches/${encodeURIComponent(match.id)}/state`, {
             method: "POST",
             body: JSON.stringify({
@@ -1496,9 +1578,15 @@
               }
             })
           });
+          const responseReceivedAt = performance.now();
           if (onlineMatch !== match) return;
           matchRetryDelay = 1000;
-          updateOpponentBalls(result.balls, result.opponentPaddle);
+          updateServerClock(result.serverTimeMs, requestStartedAt, responseReceivedAt);
+          updateOpponentBalls(
+            result.balls,
+            result.opponentPaddle,
+            result.opponentStateAtMs
+          );
           match.opponent = result.opponent;
           match.opponentScore = result.opponentScore;
           matchStatus.textContent = result.state === "completed"
@@ -1551,8 +1639,44 @@
         }
       }
 
-      function updateOpponentBalls(snapshots, paddleSnapshot) {
+      function updateServerClock(serverTimeMs, requestStartedAt, responseReceivedAt) {
+        if (
+          !Number.isFinite(serverTimeMs) ||
+          !Number.isFinite(requestStartedAt) ||
+          !Number.isFinite(responseReceivedAt)
+        ) {
+          return;
+        }
+        const midpoint = (requestStartedAt + responseReceivedAt) / 2;
+        const measuredOffset = serverTimeMs - midpoint;
+        if (serverClockOffsetMs === null) {
+          serverClockOffsetMs = measuredOffset;
+          return;
+        }
+        const correction = (measuredOffset - serverClockOffsetMs) * 0.2;
+        serverClockOffsetMs += Math.max(-12, Math.min(12, correction));
+      }
+
+      function appendRemoteSample(samples, sample) {
+        const latest = samples[samples.length - 1];
+        if (latest && sample.time < latest.time) return;
+        if (latest && sample.time - latest.time > REMOTE_MAX_SAMPLE_GAP_MS) {
+          samples.length = 0;
+        }
+        const previous = samples[samples.length - 1];
+        if (previous && sample.time === previous.time) {
+          samples[samples.length - 1] = sample;
+        } else {
+          samples.push(sample);
+        }
+        if (samples.length > 12) samples.shift();
+      }
+
+      function updateOpponentBalls(snapshots, paddleSnapshot, stateAtMs) {
         const now = performance.now();
+        const sampleTime = Number.isFinite(stateAtMs) && stateAtMs > 0
+          ? stateAtMs
+          : now + (serverClockOffsetMs || 0);
         if (Array.isArray(snapshots)) {
           const existing = new Map(opponentBalls.map(ball => [ball.id, ball]));
           opponentBalls = snapshots.map(snapshot => {
@@ -1565,15 +1689,14 @@
               trail: [],
               powerReadyAt: 0
             };
-            ball.samples.push({
-              time: now,
+            appendRemoteSample(ball.samples, {
+              time: sampleTime,
               x: snapshot.x,
               y: snapshot.y,
               vx: snapshot.vx,
               vy: snapshot.vy,
               radius: snapshot.radius
             });
-            if (ball.samples.length > 6) ball.samples.shift();
             Object.assign(ball, {
               vx: snapshot.vx,
               vy: snapshot.vy,
@@ -1593,13 +1716,12 @@
           if (!opponentPaddle) {
             opponentPaddle = { samples: [] };
           }
-          opponentPaddle.samples.push({
-            time: now,
+          appendRemoteSample(opponentPaddle.samples, {
+            time: sampleTime,
             x: paddleSnapshot.x,
             width: paddleSnapshot.width,
             styleId: paddleSnapshot.styleId
           });
-          if (opponentPaddle.samples.length > 6) opponentPaddle.samples.shift();
         }
       }
 
@@ -1786,6 +1908,7 @@
         controls.hidden = true;
         startButton.disabled = false;
         updatePointsDisplay();
+        void loadLeaderboards();
       }
 
       function showUsage() {
@@ -1919,8 +2042,11 @@
       }
 
       function draw(time = performance.now()) {
-        updateOpponentBallPositions(time);
-        updateOpponentPaddlePosition(time);
+        const remoteTime = serverClockOffsetMs === null
+          ? time
+          : time + serverClockOffsetMs;
+        updateOpponentBallPositions(remoteTime);
+        updateOpponentPaddlePosition(remoteTime);
         ctx.clearRect(0, 0, width, height);
         const backgroundStyle = currentBackgroundStyle();
         const sky = ctx.createLinearGradient(0, 0, width, height);
@@ -2852,9 +2978,12 @@
 
       function countdownFrame(time) {
         if (!countdownActive) return;
-        const remaining = countdownUntil - time;
+        const remaining = countdownServerDeadlineMs !== null && serverClockOffsetMs !== null
+          ? countdownServerDeadlineMs - (time + serverClockOffsetMs)
+          : countdownUntil - time;
         if (remaining <= 0) {
           countdownActive = false;
+          countdownServerDeadlineMs = null;
           running = true;
           lastTime = 0;
           gameAgainButton.disabled = false;
@@ -2878,7 +3007,7 @@
         animationId = requestAnimationFrame(countdownFrame);
       }
 
-      function start(preserveScore = false) {
+      function start(preserveScore = false, serverStartAtMs = null) {
         cancelAnimationFrame(animationId);
         clearContinueCountdown();
         continueAction.hidden = true;
@@ -2903,6 +3032,9 @@
         setPauseButtonMode("pause");
         gameAgainButton.hidden = Boolean(onlineMatch);
         continueGameButton.hidden = false;
+        countdownServerDeadlineMs = Number.isFinite(serverStartAtMs)
+          ? serverStartAtMs
+          : null;
         countdownUntil = performance.now() + 3000;
         lastCountdownNumber = 0;
         title.textContent = "3";
@@ -2976,6 +3108,7 @@
       document.getElementById("logout-button").addEventListener("click", logout);
       document.getElementById("friend-request-button").addEventListener("click", sendFriendRequest);
       document.getElementById("friends-refresh-button").addEventListener("click", loadFriends);
+      document.getElementById("leaderboards-refresh-button").addEventListener("click", loadLeaderboards);
       onlinePlayButton.addEventListener("click", findOnlineMatch);
       onlineCancelButton.addEventListener("click", cancelMatchmaking);
       pauseButton.addEventListener("click", togglePause);
