@@ -1388,7 +1388,7 @@ class BounceHandler(BaseHTTPRequestHandler):
                     score,
                     int(finished),
                     int(finished),
-                    int(finished),
+                    finished,
                     now_ms,
                     now,
                     json.dumps(clean_balls),
