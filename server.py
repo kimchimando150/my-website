@@ -108,6 +108,7 @@ def initialize_postgres_database():
             created_at BIGINT NOT NULL,
             points BIGINT NOT NULL DEFAULT 0,
             points_initialized INTEGER NOT NULL DEFAULT 0,
+            legacy_points_imported INTEGER NOT NULL DEFAULT 0,
             best_catches BIGINT NOT NULL DEFAULT 0
         );
         CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_unique
@@ -176,6 +177,7 @@ def initialize_postgres_database():
         user_migrations = {
             "points": "BIGINT NOT NULL DEFAULT 0",
             "points_initialized": "INTEGER NOT NULL DEFAULT 0",
+            "legacy_points_imported": "INTEGER NOT NULL DEFAULT 0",
             "best_catches": "BIGINT NOT NULL DEFAULT 0",
         }
         for column, definition in user_migrations.items():
@@ -205,6 +207,7 @@ def initialize_database():
                 created_at INTEGER NOT NULL,
                 points INTEGER NOT NULL DEFAULT 0,
                 points_initialized INTEGER NOT NULL DEFAULT 0,
+                legacy_points_imported INTEGER NOT NULL DEFAULT 0,
                 best_catches INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS sessions (
@@ -275,6 +278,7 @@ def initialize_database():
         user_migrations = {
             "points": "INTEGER NOT NULL DEFAULT 0",
             "points_initialized": "INTEGER NOT NULL DEFAULT 0",
+            "legacy_points_imported": "INTEGER NOT NULL DEFAULT 0",
             "best_catches": "INTEGER NOT NULL DEFAULT 0",
         }
         for column, definition in user_migrations.items():
@@ -543,8 +547,8 @@ class BounceHandler(BaseHTTPRequestHandler):
                 insert_user = """
                     INSERT INTO users(
                         username, password_salt, password_hash, created_at,
-                        points, points_initialized
-                    ) VALUES (?, ?, ?, ?, ?, 1)
+                        points, points_initialized, legacy_points_imported
+                    ) VALUES (?, ?, ?, ?, ?, 1, 1)
                 """
                 if connection.is_postgres:
                     user_id = connection.execute(
@@ -628,17 +632,29 @@ class BounceHandler(BaseHTTPRequestHandler):
             self.send_error_json(400, str(error))
             return
         with connect_database() as connection:
+            begin_write_transaction(connection)
             user = self.require_user(connection)
             if not user:
+                connection.rollback()
                 return
-            connection.execute(
-                """
-                UPDATE users
-                SET points = ?, points_initialized = 1
-                WHERE id = ? AND points_initialized = 0
-                """,
-                (initial_points, user["id"]),
-            )
+            if not user["legacy_points_imported"]:
+                imported_points = initial_points if user["points"] == 0 else user["points"]
+                connection.execute(
+                    """
+                    UPDATE users
+                    SET points = ?, points_initialized = 1, legacy_points_imported = 1
+                    WHERE id = ?
+                    """,
+                    (imported_points, user["id"]),
+                )
+            elif not user["points_initialized"]:
+                connection.execute(
+                    """
+                    UPDATE users SET points = ?, points_initialized = 1
+                    WHERE id = ?
+                    """,
+                    (initial_points, user["id"]),
+                )
             updated = connection.execute(
                 "SELECT * FROM users WHERE id = ?", (user["id"],)
             ).fetchone()
