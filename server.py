@@ -984,6 +984,27 @@ class BounceHandler(BaseHTTPRequestHandler):
                 return
         self.send_json(200, {"ok": True})
 
+    def get_live_match(self, connection, user_id, now_ms):
+        active = connection.execute(
+            """
+            SELECT id FROM matches
+            WHERE status = 'playing' AND (player1_id = ? OR player2_id = ?)
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            (user_id, user_id),
+        ).fetchone()
+        if not active:
+            return None
+        self.match_payload(connection, active["id"], user_id, now_ms)
+        return connection.execute(
+            """
+            SELECT id FROM matches
+            WHERE status = 'playing' AND (player1_id = ? OR player2_id = ?)
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            (user_id, user_id),
+        ).fetchone()
+
     def join_matchmaking(self):
         now = int(time.time())
         now_ms = int(time.time() * 1000)
@@ -993,14 +1014,7 @@ class BounceHandler(BaseHTTPRequestHandler):
             if not user:
                 connection.rollback()
                 return
-            active = connection.execute(
-                """
-                SELECT id FROM matches
-                WHERE status = 'playing' AND (player1_id = ? OR player2_id = ?)
-                ORDER BY created_at DESC LIMIT 1
-                """,
-                (user["id"], user["id"]),
-            ).fetchone()
+            active = self.get_live_match(connection, user["id"], now_ms)
             if active:
                 current = connection.execute(
                     "SELECT points FROM users WHERE id = ?", (user["id"],)
@@ -1072,18 +1086,12 @@ class BounceHandler(BaseHTTPRequestHandler):
 
     def get_matchmaking_status(self):
         now = int(time.time())
+        now_ms = int(time.time() * 1000)
         with connect_database() as connection:
             user = self.require_user(connection)
             if not user:
                 return
-            active = connection.execute(
-                """
-                SELECT id FROM matches
-                WHERE status = 'playing' AND (player1_id = ? OR player2_id = ?)
-                ORDER BY created_at DESC LIMIT 1
-                """,
-                (user["id"], user["id"]),
-            ).fetchone()
+            active = self.get_live_match(connection, user["id"], now_ms)
             if active:
                 current = connection.execute(
                     "SELECT points FROM users WHERE id = ?", (user["id"],)
