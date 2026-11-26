@@ -583,8 +583,8 @@
       const paddle = { x: 300, targetX: 300, y: height - 58, width: 128, height: 16, speed: 5.2 };
       const keys = { left: false, right: false };
       const BALL_RADIUS = 9;
-      const REMOTE_INTERPOLATION_MS = 260;
-      const REMOTE_EXTRAPOLATION_MS = 120;
+      const REMOTE_RENDER_DELAY_MS = 180;
+      const REMOTE_MAX_EXTRAPOLATION_MS = 180;
       const BOOST_CHANCE = 0.16;
       const NIGHT_CHANCE = 0.10;
       const SPLIT_CHANCE = 0.10;
@@ -1552,57 +1552,124 @@
       }
 
       function updateOpponentBalls(snapshots, paddleSnapshot) {
-        if (!Array.isArray(snapshots)) return;
-        const existing = new Map(opponentBalls.map(ball => [ball.id, ball]));
         const now = performance.now();
-        updateOpponentBallPositions(now);
-        opponentBalls = snapshots.map(snapshot => {
-          const ball = existing.get(snapshot.id) || {
-            id: snapshot.id,
-            x: snapshot.x,
-            y: snapshot.y,
-            isOpponent: true,
-            trail: [],
-            powerReadyAt: 0
-          };
-          Object.assign(ball, {
-            fromX: ball.x,
-            fromY: ball.y,
-            targetX: snapshot.x,
-            targetY: snapshot.y,
-            interpolationStartedAt: now,
-            vx: snapshot.vx,
-            vy: snapshot.vy,
-            radius: snapshot.radius,
-            styleId: snapshot.styleId,
-            boostUntil: snapshot.boosted ? now + 250 : 0,
-            isOpponent: true
+        if (Array.isArray(snapshots)) {
+          const existing = new Map(opponentBalls.map(ball => [ball.id, ball]));
+          opponentBalls = snapshots.map(snapshot => {
+            const ball = existing.get(snapshot.id) || {
+              id: snapshot.id,
+              x: snapshot.x,
+              y: snapshot.y,
+              samples: [],
+              isOpponent: true,
+              trail: [],
+              powerReadyAt: 0
+            };
+            ball.samples.push({
+              time: now,
+              x: snapshot.x,
+              y: snapshot.y,
+              vx: snapshot.vx,
+              vy: snapshot.vy,
+              radius: snapshot.radius
+            });
+            if (ball.samples.length > 6) ball.samples.shift();
+            Object.assign(ball, {
+              vx: snapshot.vx,
+              vy: snapshot.vy,
+              radius: snapshot.radius,
+              styleId: snapshot.styleId,
+              boostUntil: snapshot.boosted ? now + 350 : 0,
+              isOpponent: true
+            });
+            return ball;
           });
-          return ball;
-        });
-        if (paddleSnapshot && Number.isFinite(paddleSnapshot.x)) {
-          opponentPaddle = {
+        }
+        if (
+          paddleSnapshot &&
+          Number.isFinite(paddleSnapshot.x) &&
+          Number.isFinite(paddleSnapshot.width)
+        ) {
+          if (!opponentPaddle) {
+            opponentPaddle = { samples: [] };
+          }
+          opponentPaddle.samples.push({
+            time: now,
             x: paddleSnapshot.x,
             width: paddleSnapshot.width,
             styleId: paddleSnapshot.styleId
-          };
+          });
+          if (opponentPaddle.samples.length > 6) opponentPaddle.samples.shift();
         }
       }
 
-      function updateOpponentBallPositions(time) {
-        for (const ball of opponentBalls) {
-          const elapsed = Math.max(0, time - ball.interpolationStartedAt);
-          const progress = Math.min(1, elapsed / REMOTE_INTERPOLATION_MS);
-          ball.x = ball.fromX + (ball.targetX - ball.fromX) * progress;
-          ball.y = ball.fromY + (ball.targetY - ball.fromY) * progress;
-          if (elapsed > REMOTE_INTERPOLATION_MS) {
-            const extrapolation = Math.min(
-              elapsed - REMOTE_INTERPOLATION_MS,
-              REMOTE_EXTRAPOLATION_MS
-            ) / 16.67;
-            ball.x += ball.vx * extrapolation;
-            ball.y += ball.vy * extrapolation;
+      function interpolateRemoteSamples(samples, targetTime) {
+        if (samples.length === 0) return null;
+        if (targetTime <= samples[0].time) return samples[0];
+        for (let index = 1; index < samples.length; index += 1) {
+          const previous = samples[index - 1];
+          const current = samples[index];
+          if (targetTime <= current.time) {
+            const progress = (targetTime - previous.time) /
+              Math.max(1, current.time - previous.time);
+            const interpolated = { ...current };
+            for (const key of ["x", "y", "width", "vx", "vy"]) {
+              if (Number.isFinite(previous[key]) && Number.isFinite(current[key])) {
+                interpolated[key] =
+                  previous[key] + (current[key] - previous[key]) * progress;
+              }
+            }
+            return interpolated;
           }
+        }
+
+        const latest = samples[samples.length - 1];
+        const previous = samples.length > 1 ? samples[samples.length - 2] : latest;
+        const elapsed = Math.min(
+          targetTime - latest.time,
+          REMOTE_MAX_EXTRAPOLATION_MS
+        );
+        const sampleInterval = Math.max(1, latest.time - previous.time) / 16.67;
+        const velocityX = Number.isFinite(latest.vx)
+          ? latest.vx
+          : Math.max(-7, Math.min(7, (latest.x - previous.x) / sampleInterval));
+        const velocityY = Number.isFinite(latest.vy)
+          ? latest.vy
+          : Number.isFinite(latest.y) && Number.isFinite(previous.y)
+            ? (latest.y - previous.y) / sampleInterval
+            : 0;
+        return {
+          ...latest,
+          x: latest.x + velocityX * elapsed / 16.67,
+          y: Number.isFinite(latest.y)
+            ? latest.y + velocityY * elapsed / 16.67
+            : latest.y
+        };
+      }
+
+      function updateOpponentBallPositions(time) {
+        const targetTime = time - REMOTE_RENDER_DELAY_MS;
+        for (const ball of opponentBalls) {
+          const sample = interpolateRemoteSamples(ball.samples, targetTime);
+          if (sample) {
+            ball.x = sample.x;
+            ball.y = sample.y;
+            ball.vx = sample.vx;
+            ball.vy = sample.vy;
+          }
+        }
+      }
+
+      function updateOpponentPaddlePosition(time) {
+        if (!opponentPaddle) return;
+        const sample = interpolateRemoteSamples(
+          opponentPaddle.samples,
+          time - REMOTE_RENDER_DELAY_MS
+        );
+        if (sample) {
+          opponentPaddle.x = sample.x;
+          opponentPaddle.width = sample.width;
+          opponentPaddle.styleId = sample.styleId;
         }
       }
 
@@ -1852,6 +1919,8 @@
       }
 
       function draw(time = performance.now()) {
+        updateOpponentBallPositions(time);
+        updateOpponentPaddlePosition(time);
         ctx.clearRect(0, 0, width, height);
         const backgroundStyle = currentBackgroundStyle();
         const sky = ctx.createLinearGradient(0, 0, width, height);
@@ -2511,7 +2580,6 @@
       function update(delta) {
         const time = performance.now();
         const frameScale = Math.min(delta / 16.67, 2);
-        updateOpponentBallPositions(time);
         if (pointerActive) {
           const dragDelta = paddle.targetX - paddle.x;
           const maxDragStep = 7 * frameScale;
