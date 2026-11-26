@@ -451,6 +451,8 @@
       let matchmakingTimer = 0;
       let matchPollingTimer = 0;
       let onlineRequestPending = false;
+      let pointsSyncPromise = null;
+      let pendingPointsDelta = 0;
       const controls = document.getElementById("controls");
       const status = document.getElementById("status");
       const pauseButton = document.getElementById("pause-button");
@@ -1084,10 +1086,64 @@
         onlinePlayButton.disabled = !loggedIn || Boolean(onlineMatch);
       }
 
+      function applyAccountPoints(account) {
+        if (!Number.isSafeInteger(account.points) || account.points < 0) {
+          throw new Error("서버 포인트 데이터가 올바르지 않습니다.");
+        }
+        points = account.points;
+        persistProgress();
+        updatePointsDisplay();
+      }
+
+      function syncAccountPoints(delta = 0) {
+        if (!onlineUser) return Promise.resolve();
+        pendingPointsDelta += delta;
+        if (pointsSyncPromise) return pointsSyncPromise;
+        const username = onlineUser;
+        pointsSyncPromise = (async () => {
+          while (pendingPointsDelta !== 0 && onlineUser === username) {
+            const batch = pendingPointsDelta;
+            pendingPointsDelta = 0;
+            try {
+              const account = await onlineApi("/api/points", {
+                method: "POST",
+                body: JSON.stringify({ delta: batch })
+              });
+              if (onlineUser === username) applyAccountPoints(account);
+            } catch (error) {
+              pendingPointsDelta += batch;
+              throw error;
+            }
+          }
+        })().catch(error => {
+          accountMessage.textContent = `포인트 서버 저장에 실패했어요: ${error.message}`;
+          console.error("계정 포인트를 서버에 동기화하지 못했습니다.", error);
+        }).finally(() => {
+          pointsSyncPromise = null;
+        });
+        return pointsSyncPromise;
+      }
+
+      async function initializeAccountPoints() {
+        const account = await onlineApi("/api/points/initialize", {
+          method: "POST",
+          body: JSON.stringify({ points })
+        });
+        applyAccountPoints(account);
+      }
+
+      async function flushAccountPoints() {
+        await syncAccountPoints();
+        if (pendingPointsDelta !== 0) {
+          throw new Error("포인트를 서버에 저장하지 못해 대전을 시작할 수 없습니다.");
+        }
+      }
+
       async function refreshAccount() {
         try {
           const result = await onlineApi("/api/me");
           onlineUser = result.username;
+          if (onlineUser) await initializeAccountPoints();
           updateAccountUi();
           if (onlineUser) {
             await loadFriends();
@@ -1108,10 +1164,12 @@
             method: "POST",
             body: JSON.stringify({
               username: accountUsername.value.trim(),
-              password: accountPassword.value
+              password: accountPassword.value,
+              points
             })
           });
           onlineUser = result.username;
+          await initializeAccountPoints();
           accountPassword.value = "";
           accountMessage.textContent = mode === "register"
             ? "계정을 만들고 로그인했어요. 비밀번호를 잊으면 복구할 수 없습니다."
@@ -1244,6 +1302,7 @@
 
       async function logout() {
         try {
+          await flushAccountPoints();
           await onlineApi("/api/logout", { method: "POST", body: "{}" });
           onlineUser = null;
           accountMessage.textContent = "로그아웃했습니다.";
@@ -1256,10 +1315,13 @@
         }
       }
 
-      function enterOnlineMatch(matchId) {
+      function enterOnlineMatch(matchId, accountPoints) {
         window.clearInterval(matchmakingTimer);
         matchmakingTimer = 0;
         onlineCancelButton.hidden = true;
+        if (Number.isSafeInteger(accountPoints) && accountPoints >= 0) {
+          applyAccountPoints({ points: accountPoints });
+        }
         onlineMatch = { id: matchId, opponent: "상대 플레이어", opponentScore: 0 };
         matchStatus.hidden = false;
         matchStatus.textContent = "상대를 기다리는 중...";
@@ -1274,12 +1336,13 @@
         onlinePlayButton.disabled = true;
         onlineStatus.textContent = "대전 상대를 찾고 있어요...";
         try {
+          await flushAccountPoints();
           const result = await onlineApi("/api/matchmaking", {
             method: "POST",
             body: "{}"
           });
           if (result.state === "matched") {
-            enterOnlineMatch(result.matchId);
+            enterOnlineMatch(result.matchId, result.points);
             return;
           }
           onlineCancelButton.hidden = false;
@@ -1295,7 +1358,7 @@
         try {
           const result = await onlineApi("/api/matchmaking");
           if (result.state === "matched") {
-            enterOnlineMatch(result.matchId);
+            enterOnlineMatch(result.matchId, result.points);
           } else if (result.state === "expired") {
             onlineStatus.textContent = "5분 동안 상대를 찾지 못해 대전 찾기가 종료됐어요. 참가비는 차감되지 않았어요.";
             window.clearInterval(matchmakingTimer);
@@ -1371,6 +1434,9 @@
                 : `패배 · 생존 ${formatSurvivalTime(result.survivalTime)} : ${formatSurvivalTime(result.opponentSurvivalTime)}`
             : `${result.opponent} · 받은 횟수 ${result.opponentScore} · 생존 ${formatSurvivalTime(result.opponentSurvivalTime)} · ${result.opponentOnline ? "접속 중" : "연결 대기 중"}`;
           if (result.state === "completed") {
+            if (Number.isSafeInteger(result.points) && result.points >= 0) {
+              applyAccountPoints({ points: result.points });
+            }
             window.clearInterval(matchPollingTimer);
             matchPollingTimer = 0;
             if (!running && !countdownActive) {
@@ -1497,6 +1563,7 @@
             action.addEventListener("click", () => {
               if (points < style.price) return;
               points -= style.price;
+              syncAccountPoints(-style.price);
               addOwnedShopItem(category, style.id);
               selectShopItem(category, style.id);
               persistProgress();
@@ -2250,6 +2317,7 @@
         clearContinueCountdown();
         continueAction.hidden = true;
         points -= 500;
+        syncAccountPoints(-500);
         persistProgress();
         updatePointsDisplay();
         start(true);
@@ -2502,6 +2570,7 @@
             }
             if (doublePointsActive) earnedPoints *= 2;
             points += earnedPoints;
+            syncAccountPoints(earnedPoints);
             if (activateDoublePoints) doublePointsRemaining = 3;
             if (activateComboPoints) comboPointsRemaining = 5;
             persistProgress();
