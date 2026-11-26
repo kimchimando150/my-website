@@ -28,6 +28,7 @@ SESSION_COOKIE = "bounce_session"
 SESSION_SECONDS = 30 * 24 * 60 * 60
 PASSWORD_ITERATIONS = 310_000
 MATCHMAKING_TIMEOUT_SECONDS = 5 * 60
+MATCH_START_DELAY_MS = 5000
 USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_]{3,16}$")
 MAX_BODY_SIZE = 16_384
 RATE_LIMITS = {}
@@ -154,6 +155,8 @@ def initialize_postgres_database():
             player2_paddle_width REAL NOT NULL DEFAULT 128,
             player1_paddle_style TEXT NOT NULL DEFAULT 'default',
             player2_paddle_style TEXT NOT NULL DEFAULT 'default',
+            player1_state_at_ms BIGINT NOT NULL DEFAULT 0,
+            player2_state_at_ms BIGINT NOT NULL DEFAULT 0,
             started_at_ms BIGINT NOT NULL DEFAULT 0,
             player1_finished_at_ms BIGINT,
             player2_finished_at_ms BIGINT,
@@ -176,6 +179,8 @@ def initialize_postgres_database():
             "player2_paddle_width": "REAL NOT NULL DEFAULT 128",
             "player1_paddle_style": "TEXT NOT NULL DEFAULT 'default'",
             "player2_paddle_style": "TEXT NOT NULL DEFAULT 'default'",
+            "player1_state_at_ms": "BIGINT NOT NULL DEFAULT 0",
+            "player2_state_at_ms": "BIGINT NOT NULL DEFAULT 0",
             "started_at_ms": "BIGINT NOT NULL DEFAULT 0",
             "player1_finished_at_ms": "BIGINT",
             "player2_finished_at_ms": "BIGINT",
@@ -199,6 +204,20 @@ def initialize_postgres_database():
             )
         connection.execute(
             "UPDATE matches SET started_at_ms = created_at * 1000 WHERE started_at_ms = 0"
+        )
+        connection.execute(
+            """
+            UPDATE matches
+            SET player1_state_at_ms = started_at_ms
+            WHERE player1_state_at_ms = 0
+            """
+        )
+        connection.execute(
+            """
+            UPDATE matches
+            SET player2_state_at_ms = started_at_ms
+            WHERE player2_state_at_ms = 0
+            """
         )
 
 
@@ -263,6 +282,8 @@ def initialize_database():
                 player2_paddle_width REAL NOT NULL DEFAULT 128,
                 player1_paddle_style TEXT NOT NULL DEFAULT 'default',
                 player2_paddle_style TEXT NOT NULL DEFAULT 'default',
+                player1_state_at_ms INTEGER NOT NULL DEFAULT 0,
+                player2_state_at_ms INTEGER NOT NULL DEFAULT 0,
                 started_at_ms INTEGER NOT NULL DEFAULT 0,
                 player1_finished_at_ms INTEGER,
                 player2_finished_at_ms INTEGER,
@@ -287,6 +308,8 @@ def initialize_database():
             "player2_paddle_width": "REAL NOT NULL DEFAULT 128",
             "player1_paddle_style": "TEXT NOT NULL DEFAULT 'default'",
             "player2_paddle_style": "TEXT NOT NULL DEFAULT 'default'",
+            "player1_state_at_ms": "INTEGER NOT NULL DEFAULT 0",
+            "player2_state_at_ms": "INTEGER NOT NULL DEFAULT 0",
             "started_at_ms": "INTEGER NOT NULL DEFAULT 0",
             "player1_finished_at_ms": "INTEGER",
             "player2_finished_at_ms": "INTEGER",
@@ -316,6 +339,20 @@ def initialize_database():
             )
         connection.execute(
             "UPDATE matches SET started_at_ms = created_at * 1000 WHERE started_at_ms = 0"
+        )
+        connection.execute(
+            """
+            UPDATE matches
+            SET player1_state_at_ms = started_at_ms
+            WHERE player1_state_at_ms = 0
+            """
+        )
+        connection.execute(
+            """
+            UPDATE matches
+            SET player2_state_at_ms = started_at_ms
+            WHERE player2_state_at_ms = 0
+            """
         )
 
 
@@ -1033,7 +1070,7 @@ class BounceHandler(BaseHTTPRequestHandler):
     def get_live_match(self, connection, user_id, now_ms):
         active = connection.execute(
             """
-            SELECT id FROM matches
+            SELECT id, started_at_ms FROM matches
             WHERE status = 'playing' AND (player1_id = ? OR player2_id = ?)
             ORDER BY created_at DESC LIMIT 1
             """,
@@ -1044,7 +1081,7 @@ class BounceHandler(BaseHTTPRequestHandler):
         self.match_payload(connection, active["id"], user_id, now_ms)
         return connection.execute(
             """
-            SELECT id FROM matches
+            SELECT id, started_at_ms FROM matches
             WHERE status = 'playing' AND (player1_id = ? OR player2_id = ?)
             ORDER BY created_at DESC LIMIT 1
             """,
@@ -1070,6 +1107,9 @@ class BounceHandler(BaseHTTPRequestHandler):
                     {
                         "state": "matched",
                         "matchId": active["id"],
+                        "startedAtMs": active["started_at_ms"],
+                        "gameStartAtMs": active["started_at_ms"] + MATCH_START_DELAY_MS,
+                        "serverTimeMs": now_ms,
                         "points": current["points"],
                     },
                 )
@@ -1106,10 +1146,14 @@ class BounceHandler(BaseHTTPRequestHandler):
                     """
                     INSERT INTO matches(
                         id, player1_id, player2_id, player1_seen, player2_seen,
-                        status, created_at, started_at_ms
-                    ) VALUES (?, ?, ?, ?, ?, 'playing', ?, ?)
+                        status, created_at, started_at_ms,
+                        player1_state_at_ms, player2_state_at_ms
+                    ) VALUES (?, ?, ?, ?, ?, 'playing', ?, ?, ?, ?)
                     """,
-                    (match_id, opponent["user_id"], user["id"], now, now, now, now_ms),
+                    (
+                        match_id, opponent["user_id"], user["id"], now, now, now,
+                        now_ms, now_ms, now_ms,
+                    ),
                 )
                 self.send_json(
                     200,
@@ -1117,6 +1161,9 @@ class BounceHandler(BaseHTTPRequestHandler):
                         "state": "matched",
                         "matchId": match_id,
                         "opponent": opponent["username"],
+                        "startedAtMs": now_ms,
+                        "gameStartAtMs": now_ms + MATCH_START_DELAY_MS,
+                        "serverTimeMs": now_ms,
                         "points": user["points"] - 300,
                     },
                 )
@@ -1128,7 +1175,7 @@ class BounceHandler(BaseHTTPRequestHandler):
                 """,
                 (user["id"], now),
             )
-        self.send_json(200, {"state": "waiting"})
+        self.send_json(200, {"state": "waiting", "serverTimeMs": now_ms})
 
     def get_matchmaking_status(self):
         now = int(time.time())
@@ -1147,6 +1194,9 @@ class BounceHandler(BaseHTTPRequestHandler):
                     {
                         "state": "matched",
                         "matchId": active["id"],
+                        "startedAtMs": active["started_at_ms"],
+                        "gameStartAtMs": active["started_at_ms"] + MATCH_START_DELAY_MS,
+                        "serverTimeMs": now_ms,
                         "points": current["points"],
                     },
                 )
@@ -1161,11 +1211,11 @@ class BounceHandler(BaseHTTPRequestHandler):
                     (user["id"], queued["queued_at"]),
                 )
                 if cursor.rowcount:
-                    self.send_json(200, {"state": "expired"})
+                    self.send_json(200, {"state": "expired", "serverTimeMs": now_ms})
                     return
                 active = connection.execute(
                     """
-                    SELECT id FROM matches
+                    SELECT id, started_at_ms FROM matches
                     WHERE status = 'playing' AND (player1_id = ? OR player2_id = ?)
                     ORDER BY created_at DESC LIMIT 1
                     """,
@@ -1180,6 +1230,9 @@ class BounceHandler(BaseHTTPRequestHandler):
                         {
                             "state": "matched",
                             "matchId": active["id"],
+                            "startedAtMs": active["started_at_ms"],
+                            "gameStartAtMs": active["started_at_ms"] + MATCH_START_DELAY_MS,
+                            "serverTimeMs": now_ms,
                             "points": current["points"],
                         },
                     )
@@ -1188,7 +1241,10 @@ class BounceHandler(BaseHTTPRequestHandler):
                     "SELECT queued_at FROM matchmaking_queue WHERE user_id = ?",
                     (user["id"],),
                 ).fetchone()
-        self.send_json(200, {"state": "waiting" if queued else "idle"})
+        self.send_json(
+            200,
+            {"state": "waiting" if queued else "idle", "serverTimeMs": now_ms},
+        )
 
     def get_match_status(self, match_id):
         now_ms = int(time.time() * 1000)
@@ -1307,13 +1363,14 @@ class BounceHandler(BaseHTTPRequestHandler):
 
         p1_finished_at = match["player1_finished_at_ms"]
         p2_finished_at = match["player2_finished_at_ms"]
+        game_start_at_ms = match["started_at_ms"] + MATCH_START_DELAY_MS
         p1_survival = max(
             0.0,
-            ((p1_finished_at or now_ms) - match["started_at_ms"]) / 1000,
+            ((p1_finished_at or now_ms) - game_start_at_ms) / 1000,
         )
         p2_survival = max(
             0.0,
-            ((p2_finished_at or now_ms) - match["started_at_ms"]) / 1000,
+            ((p2_finished_at or now_ms) - game_start_at_ms) / 1000,
         )
         own_survival = p1_survival if is_player1 else p2_survival
         rival_survival = p2_survival if is_player1 else p1_survival
@@ -1332,6 +1389,9 @@ class BounceHandler(BaseHTTPRequestHandler):
         rival_finished = match["player2_finished"] if is_player1 else match["player1_finished"]
         rival_name = match["player2_name"] if is_player1 else match["player1_name"]
         rival_balls = match["player2_balls"] if is_player1 else match["player1_balls"]
+        rival_state_at_ms = (
+            match["player2_state_at_ms"] if is_player1 else match["player1_state_at_ms"]
+        )
         rival_paddle = {
             "x": match["player2_paddle_x"] if is_player1 else match["player1_paddle_x"],
             "width": match["player2_paddle_width"] if is_player1 else match["player1_paddle_width"],
@@ -1346,6 +1406,8 @@ class BounceHandler(BaseHTTPRequestHandler):
             balls = []
         return {
             "state": match["status"],
+            "startedAtMs": match["started_at_ms"],
+            "gameStartAtMs": game_start_at_ms,
             "opponent": rival_name,
             "score": own_score,
             "opponentScore": rival_score,
@@ -1357,6 +1419,10 @@ class BounceHandler(BaseHTTPRequestHandler):
             "opponentSurvivalTime": round(rival_survival, 2),
             "balls": balls,
             "opponentPaddle": rival_paddle,
+            "serverTimeMs": int(time.time() * 1000),
+            "opponentStateAtMs": (
+                rival_state_at_ms or match["started_at_ms"] or int(time.time() * 1000)
+            ),
             "points": own_points,
         }
 
@@ -1466,6 +1532,9 @@ class BounceHandler(BaseHTTPRequestHandler):
             paddle_style_column = (
                 "player1_paddle_style" if is_player1 else "player2_paddle_style"
             )
+            state_at_column = (
+                "player1_state_at_ms" if is_player1 else "player2_state_at_ms"
+            )
             finished_at_column = (
                 "player1_finished_at_ms" if is_player1 else "player2_finished_at_ms"
             )
@@ -1479,7 +1548,8 @@ class BounceHandler(BaseHTTPRequestHandler):
                     {balls} = ?,
                     {paddle_x} = ?,
                     {paddle_width} = ?,
-                    {paddle_style} = ?
+                    {paddle_style} = ?,
+                    {state_at} = ?
                 WHERE id = ?
                 """.format(
                     score=score_column,
@@ -1490,6 +1560,7 @@ class BounceHandler(BaseHTTPRequestHandler):
                     paddle_x=paddle_x_column,
                     paddle_width=paddle_width_column,
                     paddle_style=paddle_style_column,
+                    state_at=state_at_column,
                 ),
                 (
                     score,
@@ -1503,6 +1574,7 @@ class BounceHandler(BaseHTTPRequestHandler):
                     paddle_x,
                     paddle_width,
                     paddle_style,
+                    now_ms,
                     match_id,
                 ),
             )
